@@ -74,40 +74,52 @@ struct ControlMaterial: ViewModifier {
         }
     }
 }
+private struct SettingsMenu<Value: Hashable>: View {
+    let title: String
+    @Binding var selection: Value
+    let options: [(Value, String)]
+    let reduce: Bool
+    private var selectedLabel: String { options.first { $0.0 == selection }?.1 ?? "—" }
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Menu {
+                ForEach(options.indices, id: \.self) { index in
+                    let option = options[index]
+                    Button { selection = option.0 } label: {
+                        if selection == option.0 { Label(option.1, systemImage: "checkmark") }
+                        else { Text(option.1) }
+                    }
+                }
+            } label: {
+                HStack { Text(selectedLabel); Spacer(minLength: 8); Image(systemName: "chevron.down") }
+                    .padding(.horizontal, 12).frame(width: 170, height: 30)
+                    .contentShape(Rectangle())
+                    .modifier(ControlMaterial(cornerRadius: 15, reduce: reduce))
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+            .accessibilityLabel(title).accessibilityValue(selectedLabel)
+        }
+    }
+}
 struct MonitorSettings: View {
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @ObservedObject var model: MonitorModel
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("外观")
-                Spacer()
-                Menu {
-                    ForEach(Theme.allCases) { theme in
-                        Button { model.theme = theme } label: {
-                            if model.theme == theme { Label(theme.rawValue, systemImage: "checkmark") }
-                            else { Text(theme.rawValue) }
-                        }
-                    }
-                } label: {
-                    HStack { Text(model.theme.rawValue); Spacer(minLength: 8); Image(systemName: "chevron.down") }
-                        .padding(.horizontal, 12).frame(width: 170, height: 30)
-                        .contentShape(Rectangle())
-                        .modifier(ControlMaterial(cornerRadius: 15, reduce: model.reduceTransparency))
-                }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-                .accessibilityLabel("外观").accessibilityValue(model.theme.rawValue)
+            SettingsMenu(title: "外观", selection: $model.theme,
+                         options: Theme.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
                 .accessibilityIdentifier("themePicker")
-            }
-            Picker("采样间隔", selection: $model.interval) {
-                Text("1 秒").tag(1); Text("2 秒").tag(2); Text("5 秒").tag(5)
-            }
-            Picker("CPU 口径", selection: $model.cpuScale) {
-                ForEach(CPUScale.allCases) { Text($0.rawValue).tag($0) }
-            }
-            Picker("主读数小数位", selection: $model.precision) {
-                Text("最多 0 位").tag(0); Text("最多 1 位").tag(1); Text("最多 2 位").tag(2)
-            }
+            SettingsMenu(title: "历史范围", selection: $model.range,
+                         options: HistoryRange.allCases.map { ($0, $0.label) }, reduce: model.reduceTransparency)
+            SettingsMenu(title: "采样间隔", selection: $model.interval,
+                         options: [1, 2, 5].map { ($0, "\($0) 秒") }, reduce: model.reduceTransparency)
+            SettingsMenu(title: "CPU 口径", selection: $model.cpuScale,
+                         options: CPUScale.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+            SettingsMenu(title: "主读数小数位", selection: $model.precision,
+                         options: [0, 1, 2].map { ($0, "最多 \($0) 位") }, reduce: model.reduceTransparency)
             Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
@@ -151,11 +163,11 @@ struct Trend: View {
                 }
                 }
                 .chartXScale(domain: snapshot.plotStart(range)...0)
-                .chartYScale(domain: 0...snapshot.maximum)
+                .chartYScale(domain: 0...snapshot.maximum(range))
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     if !mini {
-                        AxisMarks(position: .leading, values: [0, snapshot.maximum / 2, snapshot.maximum]) { value in
+                        AxisMarks(position: .leading, values: [0, snapshot.maximum(range) / 2, snapshot.maximum(range)]) { value in
                             AxisGridLine().foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.22) : Color.secondary.opacity(0.15))
                             AxisValueLabel {
                                 if let number = value.as(Double.self) {
@@ -185,7 +197,7 @@ struct Trend: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: samples)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.rawValue) 分钟，\(snapshot.missingReason ?? snapshot.reading)")
+        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.label)，\(snapshot.missingReason ?? snapshot.reading)")
     }
 }
 struct DetailSeriesChart: View {
@@ -221,10 +233,10 @@ struct DetailSeriesChart: View {
                     }
                 }
                 .chartXScale(domain: snapshot.plotStart(range)...0)
-                .chartYScale(domain: 0...snapshot.maximum)
+                .chartYScale(domain: 0...snapshot.maximum(range))
                 .chartXAxis(.hidden)
                 .chartYAxis {
-                    AxisMarks(position: .leading, values: [0, snapshot.maximum / 2, snapshot.maximum]) { value in
+                    AxisMarks(position: .leading, values: [0, snapshot.maximum(range) / 2, snapshot.maximum(range)]) { value in
                         AxisGridLine()
                         AxisValueLabel {
                             if let number = value.as(Double.self) { Text(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)) }
@@ -313,38 +325,51 @@ struct RangePicker: View {
     @ObservedObject var model: MonitorModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
+    private let quickRanges: [HistoryRange] = [.short, .long]
     var body: some View {
-        Group {
-            if #available(macOS 26.0, *), !model.reduceTransparency && !systemReduce {
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 12).fill(.clear)
-                        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
-                        .frame(width: 84, height: 28)
-                        .offset(x: model.range == .short ? 0 : 84)
-                        .allowsHitTesting(false)
-                    HStack(spacing: 0) {
-                        ForEach(HistoryRange.allCases) { range in
-                            Button {
-                                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
-                                    model.range = range
+        HStack(spacing: 8) {
+            if !quickRanges.contains(model.range) {
+                Text(model.range.label).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityLabel("当前历史范围：\(model.range.label)")
+            }
+            Group {
+                if #available(macOS 26.0, *), !model.reduceTransparency && !systemReduce {
+                    ZStack(alignment: .leading) {
+                        if let index = quickRanges.firstIndex(of: model.range) {
+                            RoundedRectangle(cornerRadius: 12).fill(.clear)
+                                .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
+                                .frame(width: 84, height: 28)
+                                .offset(x: CGFloat(index) * 84)
+                                .allowsHitTesting(false)
+                        }
+                        HStack(spacing: 0) {
+                            ForEach(quickRanges) { range in
+                                Button {
+                                    withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
+                                        model.range = range
+                                    }
+                                } label: {
+                                    Text(range.label).frame(maxWidth: .infinity).frame(height: 28)
+                                        .contentShape(Rectangle())
                                 }
-                            } label: {
-                                Text(range.label).frame(maxWidth: .infinity).frame(height: 28)
-                                    .contentShape(Rectangle())
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(model.range == range ? .isSelected : [])
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(model.range == range ? .isSelected : [])
                         }
                     }
+                } else {
+                    Picker("历史范围", selection: Binding<HistoryRange?>(
+                        get: { quickRanges.contains(model.range) ? model.range : nil },
+                        set: { if let range = $0 { model.range = range } }
+                    )) {
+                        ForEach(quickRanges) { Text($0.label).tag(Optional.some($0)) }
+                    }.pickerStyle(.segmented).labelsHidden()
                 }
-            } else {
-                Picker("历史范围", selection: $model.range) {
-                    ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden()
-            }
-        }.frame(width: 168).accessibilityIdentifier("rangePicker")
+            }.frame(width: 168)
+        }.accessibilityIdentifier("rangePicker")
     }
 }
+
 private struct GlassReveal: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let presented: Bool
@@ -503,6 +528,9 @@ struct Details: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    if model.metric == .sensors {
+                        sensorPage
+                    } else {
                     hero
                     Trend(snapshot: model.snapshot(model.metric), range: model.range)
                         .frame(height: 180)
@@ -522,10 +550,11 @@ struct Details: View {
                         Text(model.snapshot(model.metric).note)
                             .font(.callout).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-                        Text("图表显示本次运行的数据，最多保留 30 分钟。")
+                        Text("图表显示本次运行的数据，最多保留 24 小时。")
                             .font(.caption).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 5)
                     }.font(.caption).foregroundStyle(.primary)
+                    }
                 }.padding(28).frame(maxWidth: 1000, alignment: .leading).frame(maxWidth: .infinity)
             }
             // A different metric is a new detail page. Reset only its scroll subtree;
@@ -616,6 +645,27 @@ struct Details: View {
         }
     }
 
+    private var sensorPage: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Label("传感器", systemImage: "thermometer.medium").font(.system(size: 22, weight: .semibold))
+            if !model.sensorStatus.isEmpty { Text(model.sensorStatus).font(.callout).foregroundStyle(.secondary) }
+            ForEach(["°C", "rpm"], id: \.self) { unit in
+                let items = model.sensors.filter { $0.unit == unit }
+                if !items.isEmpty {
+                    Text(unit == "°C" ? "温度" : "风扇转速").font(.headline)
+                    ForEach(items) { sensor in
+                        HStack {
+                            Text(sensor.id)
+                            Spacer()
+                            Text("\(ValueFormat.number(sensor.value, precision: model.precision)) \(sensor.unit)").monospacedDigit()
+                        }.font(.callout)
+                    }
+                }
+            }
+            Text("数据来自 AppleSMC 私有接口，键名和可用项目因设备及系统版本而异；无风扇设备可能没有转速读数。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
     private var hero: some View {
         let snapshot = model.snapshot(model.metric)
         return VStack(alignment: .leading, spacing: 18) {
@@ -635,7 +685,7 @@ struct Details: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 5) {
                     Text(snapshot.status).font(.callout)
-                    Text("最多 \(model.range.rawValue) 分钟").font(.caption2).foregroundStyle(.primary)
+                    Text("最多 \(model.range.label)").font(.caption2).foregroundStyle(.primary)
                 }.padding(.bottom, 5)
             }
         }
@@ -735,7 +785,7 @@ struct Details: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack { Text("趋势对照").font(.system(size: 13, weight: .medium)); Spacer(); Text("不同单位").font(.caption).foregroundStyle(.primary) }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8)], spacing: 8) {
-                ForEach(Metric.allCases) { metric in
+                ForEach(Metric.allCases.filter { $0 != .sensors }) { metric in
                     let snapshot = model.snapshot(metric)
                     Button { selectMetric(metric) } label: {
                         VStack(alignment: .leading, spacing: 9) {

@@ -171,17 +171,30 @@ final class ModelTests: XCTestCase {
         XCTAssertTrue(snapshot.samples(.short).isEmpty)
         XCTAssertNil(snapshot.value)
     }
+    func testExtendedHistoryRanges() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let reading = MetricReading(date: now, value: 1, status: "", facts: [], rows: [])
+        let history = [3601.0, 3600, 21600, 86400, 86401].map {
+            TimedValue(date: now.addingTimeInterval(-$0), value: $0)
+        }.reversed()
+        let snapshot = Snapshot(metric: .network, current: reading, history: Array(history), now: now)
+        XCTAssertEqual(snapshot.samples(.hour).count, 1)
+        XCTAssertEqual(snapshot.samples(.sixHours).count, 3)
+        XCTAssertEqual(snapshot.samples(.day).count, 4)
+        XCTAssertEqual(snapshot.maximum(.day), 86400 * 1.2, accuracy: 0.001)
+        XCTAssertEqual(HistoryRange.day.label, "24 小时")
+    }
     @MainActor func testSettingsPersistAndValidate() {
         let suite = "NativeMonitorTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let first = MonitorModel(defaults: defaults)
         first.interval = 5; first.cpuScale = .average; first.precision = 2
-        first.theme = .dark; first.reduceTransparency = true; first.range = .long
+        first.theme = .dark; first.reduceTransparency = true; first.range = .day
         let restored = MonitorModel(defaults: defaults)
         XCTAssertEqual(restored.interval, 5); XCTAssertEqual(restored.cpuScale, .average)
         XCTAssertEqual(restored.precision, 2); XCTAssertEqual(restored.theme, .dark)
-        XCTAssertTrue(restored.reduceTransparency); XCTAssertEqual(restored.range, .long)
+        XCTAssertTrue(restored.reduceTransparency); XCTAssertEqual(restored.range, .day)
         defaults.set(99, forKey: "samplingInterval"); defaults.set(-1, forKey: "precision")
         XCTAssertEqual(MonitorModel(defaults: defaults).interval, 2)
         XCTAssertEqual(MonitorModel(defaults: defaults).precision, 1)
@@ -191,10 +204,10 @@ final class ModelTests: XCTestCase {
         let reading = MetricReading(date: date, value: 150, status: "", facts: [], rows: [], cores: [50, 100], cpuParts: [100, 50, 50])
         let total = Snapshot(metric: .cpu, current: reading, history: [TimedValue(date: date, value: 150)], now: date)
         let average = Snapshot(metric: .cpu, current: reading, history: [TimedValue(date: date, value: 150)], now: date, cpuScale: .average)
-        XCTAssertEqual(total.value, 150); XCTAssertEqual(total.maximum, 200)
+        XCTAssertEqual(total.value, 150); XCTAssertEqual(total.maximum(.short), 200)
         let eighteen = MetricReading(date: date, value: 1800, status: "", facts: [], rows: [], cores: Array(repeating: 100, count: 18))
-        XCTAssertEqual(Snapshot(metric: .cpu, current: eighteen).maximum, 1800)
-        XCTAssertEqual(average.value, 75); XCTAssertEqual(average.maximum, 100)
+        XCTAssertEqual(Snapshot(metric: .cpu, current: eighteen).maximum(.short), 1800)
+        XCTAssertEqual(average.value, 75); XCTAssertEqual(average.maximum(.short), 100)
         XCTAssertEqual(average.status, "整机平均使用率")
         XCTAssertEqual(average.samples(.short).first?.value, 75)
         XCTAssertEqual(ValueFormat.rate(0.01, precision: 1), "<0.1 B/s")

@@ -1,10 +1,15 @@
 import Foundation
 
-// 系统采样与 GPU 采样分别串行，且各自只访问所属状态。
+// 系统、GPU 和传感器采样分别串行，且各自只访问所属状态。
 final class MonitorCollector: @unchecked Sendable {
     private var previousCPU: [CPUCounters]?
     private var previousDisk: (TimeInterval, Counters)?
     private var previousNetwork: (TimeInterval, [InterfaceCounters])?
+    private var sensorReader: SensorReader?
+    func readSensors() -> [SensorReading]? {
+        if sensorReader == nil { sensorReader = SensorReader() }
+        return sensorReader?.read()
+    }
     private var anePower: ANEPowerReader?
     private var aneRetryAfter: TimeInterval = 0
     private static func text(_ value: Double?, suffix: String) -> String {
