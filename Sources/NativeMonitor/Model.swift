@@ -2,13 +2,13 @@ import Foundation
 import Combine
 
 enum Metric: String, CaseIterable, Identifiable {
-    case cpu = "CPU", gpu = "GPU", memory = "内存", disk = "磁盘", network = "网络"
+    case cpu = "CPU", gpu = "GPU", memory = "内存", disk = "磁盘", network = "网络", sensors = "传感器"
     var id: String { rawValue }
     var symbol: String {
-        switch self { case .cpu: "cpu"; case .gpu: "square.stack.3d.up"; case .memory: "memorychip"; case .disk: "internaldrive"; case .network: "network" }
+        switch self { case .cpu: "cpu"; case .gpu: "square.stack.3d.up"; case .memory: "memorychip"; case .disk: "internaldrive"; case .network: "network"; case .sensors: "thermometer.medium" }
     }
     var unit: String {
-        switch self { case .cpu, .gpu: "%"; case .memory: "GB"; case .disk, .network: "MB/s" }
+        switch self { case .cpu, .gpu: "%"; case .memory: "GB"; case .disk, .network: "MB/s"; case .sensors: "" }
     }
 }
 enum CPUScale: String, CaseIterable, Identifiable {
@@ -105,6 +105,7 @@ struct Snapshot {
         case .gpu: "Apple GPU 驱动报告的设备、渲染器和分块器利用率不可相加；驱动分配及使用系统内存属于实验性统计，并非独立显存或 GPU 独占内存。Metal 建议工作集是建议上限，不是实际占用。GPU Neural Accelerator 与独立 Apple Neural Engine 是不同硬件；当前应用未能读取两者的独立实时利用率。ANE 功耗为 IOReport 能量模型按驱动发布时间计算的区间平均值，接口为私有实现，停更或不可用时不显示；功耗不等于利用率。GPU 核心数按驱动核心掩码置位数推算，num_cores 不能直接视为启用核心数；字段和统计窗口没有稳定公开契约。"
         case .memory: "内存按 1 GB = 1,073,741,824 字节换算，与系统信息一致。主指标为活跃、不可换出和压缩页之和；活跃页可能包含文件缓存，非活跃页未计入；分项曲线另展示非活跃和空闲页，不能将所有曲线相加作为主指标。该值不是应用内存或内存压力，与系统其他工具的已用内存口径不同。统一内存由系统和 GPU 共享。"
         case .disk: "速率是系统识别的块存储设备读写量之和；容量为用户主目录所在卷。系统缓存、外接设备和 APFS 共享空间会影响读数。"
+        case .sensors: "传感器来自 AppleSMC 私有接口，名称为系统提供的键名；可用项目随设备和系统版本变化。"
         case .network: "速率为处于运行状态的 en 接口接收或发送字节之和，包含本地网络流量；不统计 VPN、虚拟及其他名称接口，不能视为互联网流量。接口变化时重新建立速率基线。"
         }
     }
@@ -163,6 +164,11 @@ struct Snapshot {
     private var requestDate: Date?
     private var gpuInFlight = false
     private var gpuRequestDate: Date?
+    @Published private(set) var sensors: [SensorReading] = []
+    @Published private(set) var sensorStatus = "等待传感器采样"
+    private var sensorInFlight = false
+    private var sensorRequestDate: Date?
+    private let sensorQueue = DispatchQueue(label: "NativeMonitor.sensors", qos: .utility)
     private let collector = MonitorCollector()
     private(set) var coreLabels: [String]?
     private(set) var coreClusters: [CPUCluster]?
@@ -195,10 +201,26 @@ struct Snapshot {
     private func refresh() {
         now = Date()
         if inFlight, requestDate.map({ now.timeIntervalSince($0) > Double(max(6, interval * 3)) }) == true {
-            for metric in Metric.allCases where metric != .gpu { setUnavailable(metric) }
+            for metric in Metric.allCases where metric != .gpu && metric != .sensors { setUnavailable(metric) }
         }
         if gpuInFlight, gpuRequestDate.map({ now.timeIntervalSince($0) > Double(max(6, interval * 3)) }) == true { setUnavailable(.gpu) }
+        if sensorInFlight, sensorRequestDate.map({ now.timeIntervalSince($0) > Double(max(6, interval * 3)) }) == true {
+            sensors = []; sensorStatus = "传感器采样超时"
+        }
         let collector = collector
+        if !sensorInFlight {
+            sensorInFlight = true
+            sensorRequestDate = now
+            sensorQueue.async { [weak self] in
+                let readings = collector.readSensors()
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.sensorInFlight = false
+                    self.sensors = readings ?? []
+                    self.sensorStatus = readings == nil ? "传感器数据不可用" : readings!.isEmpty ? "未发现可读取的温度或风扇传感器" : "本机实时采样"
+                }
+            }
+        }
         if !inFlight {
             inFlight = true
             requestDate = now
