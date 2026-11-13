@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 if [[ "$(uname -m)" != "arm64" ]]; then
-  echo "此原型只面向 Apple Silicon，请在 arm64 Mac 上构建。" >&2
+  echo "此应用只面向 Apple Silicon，请在 arm64 Mac 上构建。" >&2
   exit 1
 fi
 sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
@@ -21,7 +21,7 @@ cat > "$app_path/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.ashen.NativeMonitorPrototype</string>
 <key>CFBundleName</key><string>NativeMonitor</string>
 <key>CFBundleIconFile</key><string>NativeMonitor</string>
-<key>CFBundleDisplayName</key><string>性能监控原型</string>
+<key>CFBundleDisplayName</key><string>性能监控</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>CFBundleVersion</key><string>1</string>

@@ -86,7 +86,7 @@ final class MonitorCollector: @unchecked Sendable {
             ], rows: [Fact(label: "设备", value: gpu.deviceName ?? "—"), Fact(label: "驱动", value: gpu.driver),
                       Fact(label: "驱动分配系统内存", value: Self.bytes(gpu.allocatedMemory)),
                       Fact(label: "Metal 建议工作集", value: Self.bytes(gpu.recommendedWorkingSet)),
-                      Fact(label: "数据源", value: "IORegistry · PerformanceStatistics"), Fact(label: "最后更新", value: date.formatted(date: .omitted, time: .standard))], series: series, anePower: power)
+                      Fact(label: "最后更新", value: date.formatted(date: .omitted, time: .standard))], series: series, anePower: power)
         case .failure(let error): return MetricReading(date: date, value: nil, status: error.localizedDescription, facts: [], rows: [], anePower: power)
         }
     }
