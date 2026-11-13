@@ -41,7 +41,11 @@ final class SystemReaderTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.15)
         let second = collector.read()
         let cpu = try XCTUnwrap(second[.cpu]?.value)
-        XCTAssertTrue((0...100).contains(cpu))
+        let cores = try XCTUnwrap(second[.cpu]?.cores)
+        XCTAssertFalse(cores.isEmpty)
+        XCTAssertTrue(cores.allSatisfy { $0.map { (0...100).contains($0) } ?? false })
+        XCTAssertEqual(cpu, cores.compactMap { $0 }.reduce(0, +), accuracy: 0.001)
+        XCTAssertLessThanOrEqual(cpu, Double(cores.count) * 100)
         XCTAssertGreaterThan(try XCTUnwrap(second[.memory]?.value), 0)
         XCTAssertGreaterThanOrEqual(try XCTUnwrap(second[.disk]?.value), 0)
         if let interfaces = SystemReader.network(), !interfaces.isEmpty {

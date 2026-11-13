@@ -2,7 +2,7 @@ import Foundation
 
 // 状态只由单个进行中的系统采样任务访问；GPU 采样不访问该状态。
 final class MonitorCollector: @unchecked Sendable {
-    private var previousCPU: CPUCounters?
+    private var previousCPU: [CPUCounters]?
     private var previousDisk: (TimeInterval, Counters)?
     private var previousNetwork: (TimeInterval, [InterfaceCounters])?
     private static func text(_ value: Double?, suffix: String) -> String {
@@ -18,12 +18,17 @@ final class MonitorCollector: @unchecked Sendable {
         var result: [Metric: MetricReading] = [:]
         var loads = [Double](repeating: 0, count: 3)
         let loadCount = getloadavg(&loads, 3)
-        let cpu = SystemReader.cpu()
-        let percentages = cpu.flatMap { current in previousCPU.flatMap { current.percentages(since: $0) } }
+        let cpu = SystemReader.cpuCores()
+        let corePercentages: [(Double, Double, Double)?]
+        if let cpu, let previousCPU, cpu.count == previousCPU.count {
+            corePercentages = zip(cpu, previousCPU).map { $0.percentages(since: $1) }
+        } else { corePercentages = Array(repeating: nil, count: cpu?.count ?? 0) }
         previousCPU = cpu
-        result[.cpu] = MetricReading(date: date, value: percentages.map { $0.0 + $0.1 }, status: percentages == nil ? "等待 CPU 采样" : "整机使用率", facts: [
-            Fact(label: "用户", value: Self.text(percentages?.0, suffix: "%")), Fact(label: "系统", value: Self.text(percentages?.1, suffix: "%")), Fact(label: "空闲", value: Self.text(percentages?.2, suffix: "%"))
-        ], rows: [Fact(label: "逻辑核心", value: "\(ProcessInfo.processInfo.activeProcessorCount) / \(ProcessInfo.processInfo.processorCount)"), Fact(label: "运行时间", value: Self.text(uptime / 3600, suffix: "小时")), Fact(label: "系统负载（1 / 5 / 15 分钟）", value: loadCount == 3 ? loads.map { $0.formatted(.number.precision(.fractionLength(2))) }.joined(separator: " / ") : "—")])
+        let validCores = corePercentages.compactMap { $0 }
+        let total = !corePercentages.isEmpty && validCores.count == corePercentages.count ? validCores.reduce((0.0, 0.0, 0.0)) { ($0.0 + $1.0, $0.1 + $1.1, $0.2 + $1.2) } : nil
+        result[.cpu] = MetricReading(date: date, value: total.map { $0.0 + $0.1 }, status: total == nil ? "等待 CPU 采样" : "核心使用率之和", facts: [
+            Fact(label: "用户", value: Self.text(total?.0, suffix: "%")), Fact(label: "系统", value: Self.text(total?.1, suffix: "%")), Fact(label: "空闲", value: Self.text(total?.2, suffix: "%"))
+        ], rows: [Fact(label: "逻辑核心", value: "\(cpu?.count ?? 0)"), Fact(label: "运行时间", value: Self.text(uptime / 3600, suffix: "小时")), Fact(label: "系统负载（1 / 5 / 15 分钟）", value: loadCount == 3 ? loads.map { $0.formatted(.number.precision(.fractionLength(2))) }.joined(separator: " / ") : "—")], cores: corePercentages.map { $0.map { $0.0 + $0.1 } })
         if let memory = SystemReader.memory() {
             result[.memory] = MetricReading(date: date, value: Double(memory.used) / 1e9, status: "活跃 + 不可换出 + 压缩", facts: [
                 Fact(label: "物理内存", value: Self.bytes(memory.total)), Fact(label: "压缩", value: Self.bytes(memory.compressed)), Fact(label: "交换已用", value: Self.bytes(memory.swapUsed))

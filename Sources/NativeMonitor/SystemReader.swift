@@ -51,6 +51,22 @@ struct SystemReader {
         guard result == KERN_SUCCESS else { return nil }
         return CPUCounters(user: UInt64(info.cpu_ticks.0), system: UInt64(info.cpu_ticks.1), idle: UInt64(info.cpu_ticks.2), nice: UInt64(info.cpu_ticks.3))
     }
+    static func cpuCores() -> [CPUCounters]? {
+        var processorCount: natural_t = 0
+        var info: processor_info_array_t?
+        var count: mach_msg_type_number_t = 0
+        guard host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &processorCount, &info, &count) == KERN_SUCCESS,
+              let info else { return nil }
+        defer { vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(count) * vm_size_t(MemoryLayout<integer_t>.size)) }
+        guard processorCount > 0, Int(count) >= Int(processorCount) * Int(CPU_STATE_MAX) else { return nil }
+        return (0..<Int(processorCount)).map { index in
+            let ticks = info.advanced(by: index * Int(CPU_STATE_MAX))
+            return CPUCounters(user: UInt64(UInt32(bitPattern: ticks[Int(CPU_STATE_USER)])),
+                               system: UInt64(UInt32(bitPattern: ticks[Int(CPU_STATE_SYSTEM)])),
+                               idle: UInt64(UInt32(bitPattern: ticks[Int(CPU_STATE_IDLE)])),
+                               nice: UInt64(UInt32(bitPattern: ticks[Int(CPU_STATE_NICE)])))
+        }
+    }
     static func memory() -> MemoryReading? {
         var info = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)

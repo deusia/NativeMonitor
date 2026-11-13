@@ -29,6 +29,7 @@ struct MetricReading {
     let status: String
     let facts: [Fact]
     let rows: [Fact]
+    var cores: [Double?] = []
 }
 struct Snapshot {
     let metric: Metric
@@ -54,12 +55,13 @@ struct Snapshot {
         return result
     }
     var maximum: Double {
-        if metric == .cpu || metric == .gpu { return 100 }
+        if metric == .cpu { return Double(max(current?.cores.count ?? 0, 1)) * 100 }
+        if metric == .gpu { return 100 }
         return max(1, (samples(.long).map(\.value).max() ?? value ?? 0) * 1.2)
     }
     var note: String {
         switch metric {
-        case .cpu: "整机 CPU 使用率按两次系统累计时间差计算，用户包含 nice；首次采样需要等待下一次读数。"
+        case .cpu: "CPU 总量为各逻辑核心使用率之和，单核满载为 100%；用户包含 nice。首次采样需要等待下一次读数。"
         case .gpu: "Apple GPU 驱动报告的设备利用率，不是进程 GPU 时间；渲染器和分块器不可相加。驱动字段和统计窗口没有稳定公开契约。"
         case .memory: "主指标为活跃、不可换出和压缩页之和；活跃页可能包含文件缓存，非活跃页未计入。该值不是应用内存或内存压力，与系统其他工具的已用内存口径不同。统一内存由系统和 GPU 共享。"
         case .disk: "速率是系统识别的块存储设备读写量之和；容量为用户主目录所在卷。系统缓存、外接设备和 APFS 共享空间会影响读数。"

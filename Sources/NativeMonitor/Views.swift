@@ -382,6 +382,7 @@ struct Details: View {
                     Trend(snapshot: model.snapshot(model.metric), range: model.range)
                         .frame(height: 180)
                     facts
+                    if model.metric == .cpu { cpuCores }
                     Divider()
                     comparison
                     Divider()
@@ -516,6 +517,23 @@ struct Details: View {
                     Text(fact.label).font(.caption).foregroundStyle(.primary)
                     Text(fact.value).font(.system(size: 17, weight: .medium)).monospacedDigit()
                 }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+    private var cpuCores: some View {
+        let cores = model.snapshot(.cpu).current?.cores ?? []
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("逻辑核心", systemImage: "square.grid.3x3.fill").font(.headline)
+            if cores.isEmpty { Text("等待核心采样").foregroundStyle(.secondary) }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
+                ForEach(Array(cores.enumerated()), id: \.offset) { index, value in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack { Text("核心 \(index + 1)"); Spacer(); Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit() }
+                        ProgressView(value: value ?? 0, total: 100).tint(metricColor)
+                    }.font(.caption).padding(10).modifier(ControlMaterial(reduce: model.reduceTransparency))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("核心 \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
+                }
             }
         }
     }
