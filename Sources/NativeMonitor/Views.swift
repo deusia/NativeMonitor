@@ -188,6 +188,44 @@ struct Trend: View {
         .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.rawValue) 分钟，\(snapshot.missingReason ?? snapshot.reading)，\(snapshot.sourceLabel)")
     }
 }
+struct DetailSeriesChart: View {
+    let snapshot: Snapshot
+    let range: HistoryRange
+    private let colors: [String: Color] = ["用户": .blue, "系统": .orange, "设备": .blue,
+        "渲染器": .purple, "分块器": .orange, "活跃": .blue, "不可换出": .orange,
+        "压缩": .purple, "读取": .blue, "写入": .orange, "接收": .blue, "发送": .orange]
+    var body: some View {
+        let points = snapshot.seriesSamples(range)
+        let names = Array(Set(points.map(\.name))).sorted()
+        VStack(alignment: .leading, spacing: 12) {
+            Label("分项趋势", systemImage: "chart.xyaxis.line").font(.headline)
+            if points.isEmpty {
+                Text(snapshot.missingReason ?? "等待分项样本").foregroundStyle(.secondary).frame(height: 80)
+            } else {
+                Chart(points) { point in
+                    LineMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment))
+                        .foregroundStyle(by: .value("指标", point.name))
+                        .interpolationMethod(.linear)
+                }
+                .chartForegroundStyleScale(domain: names, range: names.map { colors[$0] ?? .gray })
+                .chartLegend(position: .bottom, alignment: .leading)
+                .chartXScale(domain: snapshot.plotStart(range)...0)
+                .chartYScale(domain: 0...snapshot.maximum)
+                .chartXAxis(.hidden)
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: [0, snapshot.maximum / 2, snapshot.maximum]) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let number = value.as(Double.self) { Text(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)) }
+                        }
+                    }
+                }
+                .frame(height: 180)
+                .accessibilityLabel("\(snapshot.metric.rawValue)分项趋势，包含\(names.joined(separator: "、"))")
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
 struct RangePicker: View {
     @ObservedObject var model: MonitorModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -393,6 +431,7 @@ struct Details: View {
                     Trend(snapshot: model.snapshot(model.metric), range: model.range)
                         .frame(height: 180)
                     facts
+                    DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
                     if model.metric == .cpu { cpuCores }
                     Divider()
                     comparison
@@ -500,7 +539,7 @@ struct Details: View {
         let snapshot = model.snapshot(model.metric)
         return VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center) {
-                Text(model.metric.rawValue).font(.system(size: 22, weight: .semibold))
+                Label(model.metric.rawValue, systemImage: model.metric.symbol).font(.system(size: 22, weight: .semibold))
                 Spacer(minLength: 12)
                 RangePicker(model: model)
             }
@@ -522,12 +561,13 @@ struct Details: View {
         }
     }
     private var facts: some View {
-        HStack(alignment: .top, spacing: 16) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], alignment: .leading, spacing: 10) {
             ForEach(model.snapshot(model.metric).facts) { fact in
                 VStack(alignment: .leading, spacing: 7) {
                     Text(fact.label).font(.caption).foregroundStyle(.primary)
                     Text(fact.value).font(.system(size: 17, weight: .medium)).monospacedDigit()
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(12).frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                    .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
             }
         }
     }

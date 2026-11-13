@@ -26,7 +26,14 @@ enum HistoryRange: Int, CaseIterable, Identifiable {
 }
 struct Sample: Identifiable, Equatable { let id: Double; let minute: Double; let value: Double }
 struct Fact: Identifiable { let label: String; let value: String; var id: String { label } }
-struct TimedValue { let date: Date; let value: Double }
+struct TimedValue { let date: Date; let value: Double; var series: [String: Double] = [:] }
+struct LinePoint: Identifiable {
+    let name: String
+    let segment: String
+    let minute: Double
+    let value: Double
+    let id: String
+}
 struct MetricReading {
     let date: Date
     let value: Double?
@@ -35,6 +42,7 @@ struct MetricReading {
     let rows: [Fact]
     var cores: [Double?] = []
     var cpuParts: [Double] = []
+    var series: [String: Double] = [:]
 }
 struct Snapshot {
     let metric: Metric
@@ -75,16 +83,34 @@ struct Snapshot {
     var maximum: Double {
         if metric == .cpu { return Double(max(current?.cores.count ?? 0, 1)) * 100 * cpuFactor }
         if metric == .gpu { return 100 }
-        return max(1, (samples(.long).map(\.value).max() ?? value ?? 0) * 1.2)
+        return max(0.001, max(samples(.long).map(\.value).max() ?? 0, seriesSamples(.long).map(\.value).max() ?? 0, value ?? 0) * 1.2)
     }
     var note: String {
         switch metric {
         case .cpu: "CPU 总量为各逻辑核心使用率之和，单核满载为 100%；用户包含 nice。首次采样需要等待下一次读数。"
-        case .gpu: "Apple GPU 驱动报告的设备利用率，不是进程 GPU 时间；渲染器和分块器不可相加。驱动字段和统计窗口没有稳定公开契约。"
+        case .gpu: "Apple GPU 驱动报告的设备、渲染器和分块器利用率不可相加；驱动分配及使用系统内存属于实验性统计，并非独立显存或 GPU 独占内存。Metal 建议工作集是建议上限，不是实际占用；驱动字段和统计窗口没有稳定公开契约。"
         case .memory: "主指标为活跃、不可换出和压缩页之和；活跃页可能包含文件缓存，非活跃页未计入。该值不是应用内存或内存压力，与系统其他工具的已用内存口径不同。统一内存由系统和 GPU 共享。"
         case .disk: "速率是系统识别的块存储设备读写量之和；容量为用户主目录所在卷。系统缓存、外接设备和 APFS 共享空间会影响读数。"
         case .network: "速率为处于运行状态的 en 接口接收或发送字节之和，包含本地网络流量；不统计 VPN、虚拟及其他名称接口，不能视为互联网流量。接口变化时重新建立速率基线。"
         }
+    }
+    func seriesSamples(_ range: HistoryRange) -> [LinePoint] {
+        guard value != nil else { return [] }
+        var segments: [String: Int] = [:], active = Set<String>()
+        var points: [LinePoint] = []
+        for item in history {
+            let minute = item.date.timeIntervalSince(now) / 60
+            guard minute >= -Double(range.rawValue), minute <= 0 else { continue }
+            let names = Set(item.series.keys)
+            for name in active.subtracting(names) { segments[name, default: 0] += 1 }
+            for (name, value) in item.series {
+                let segment = "\(name)-\(segments[name, default: 0])"
+                points.append(LinePoint(name: name, segment: segment, minute: minute,
+                                        value: value * cpuFactor, id: "\(segment)-\(item.date.timeIntervalSinceReferenceDate)"))
+            }
+            active = names
+        }
+        return points
     }
     func plotStart(_ range: HistoryRange) -> Double {
         guard let first = samples(range).first else { return -Double(range.rawValue) }
@@ -187,10 +213,11 @@ struct Snapshot {
     }
     private func record(_ reading: MetricReading, for metric: Metric) {
         now = Date()
+        if metric == .cpu, let previous = readings[metric], previous.cores.count != reading.cores.count { histories[metric] = [] }
         readings[metric] = reading
         if let value = reading.value {
             histories[metric, default: []].removeAll { now.timeIntervalSince($0.date) > 1800 }
-            histories[metric, default: []].append(TimedValue(date: reading.date, value: value))
+            histories[metric, default: []].append(TimedValue(date: reading.date, value: value, series: reading.series))
         } else { histories[metric] = [] }
     }
     func snapshot(_ metric: Metric) -> Snapshot {

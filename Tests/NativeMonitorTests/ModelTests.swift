@@ -198,4 +198,18 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(ValueFormat.rate(1250, precision: 1), "1.2 KB/s")
         XCTAssertEqual(ValueFormat.rate(1_250_000, precision: 2), "1.25 MB/s")
     }
+    func testSeriesGapsAndGPUOptionalMetrics() throws {
+        let start = Date(timeIntervalSince1970: 1000)
+        let reading = MetricReading(date: start, value: 30, status: "", facts: [], rows: [])
+        let history = [TimedValue(date: start, value: 10, series: ["设备": 10, "渲染器": 5]),
+                       TimedValue(date: start.addingTimeInterval(1), value: 20, series: ["设备": 20]),
+                       TimedValue(date: start.addingTimeInterval(2), value: 30, series: ["设备": 30, "渲染器": 8])]
+        let snapshot = Snapshot(metric: .gpu, current: reading, history: history, now: start.addingTimeInterval(2))
+        let renderer = snapshot.seriesSamples(.short).filter { $0.name == "渲染器" }
+        XCTAssertEqual(renderer.count, 2)
+        XCTAssertNotEqual(renderer[0].segment, renderer[1].segment)
+        let gpu = try GPUReading.parse(["Device Utilization %": 50, "Alloc system memory": 1024, "In use system memory": true], driver: "AGX")
+        XCTAssertEqual(gpu.allocatedMemory, 1024)
+        XCTAssertNil(gpu.usedMemory)
+    }
 }

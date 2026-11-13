@@ -1,5 +1,6 @@
 import Foundation
 import IOKit
+import Metal
 
 struct GPUReading {
     let date: Date
@@ -7,6 +8,10 @@ struct GPUReading {
     let utilization: Double
     let renderer: Double?
     let tiler: Double?
+    var allocatedMemory: UInt64? = nil
+    var usedMemory: UInt64? = nil
+    var deviceName: String? = nil
+    var recommendedWorkingSet: UInt64? = nil
 
     static func parse(_ statistics: [String: Any], driver: String, date: Date = Date()) throws(GPUReadError) -> GPUReading {
         func percent(_ key: String) -> Double? {
@@ -15,9 +20,16 @@ struct GPUReading {
             let value = number.doubleValue
             return value.isFinite && (0...100).contains(value) ? value : nil
         }
+        func bytes(_ key: String) -> UInt64? {
+            guard let number = statistics[key] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            let value = number.doubleValue
+            guard value.isFinite, value >= 0, value < Double(UInt64.max), value.rounded(.towardZero) == value else { return nil }
+            return number.uint64Value
+        }
         guard let value = percent("Device Utilization %") else { throw GPUReadError.invalidCounter }
         return GPUReading(date: date, driver: driver, utilization: value,
-                          renderer: percent("Renderer Utilization %"), tiler: percent("Tiler Utilization %"))
+                          renderer: percent("Renderer Utilization %"), tiler: percent("Tiler Utilization %"),
+                          allocatedMemory: bytes("Alloc system memory"), usedMemory: bytes("In use system memory"))
     }
 }
 enum GPUReadError: Error, LocalizedError {
@@ -48,7 +60,14 @@ enum GPUReader {
         guard let candidate = candidates.first else { return .failure(.unavailable) }
         guard candidates.count == 1 else { return .failure(.ambiguous) }
         // shortcut: 驱动字段没有稳定公开契约；支持其他硬件前必须重新核实来源与口径。
-        do { return .success(try GPUReading.parse(candidate.1, driver: candidate.0)) }
+        do {
+            var reading = try GPUReading.parse(candidate.1, driver: candidate.0)
+            if let device = MTLCreateSystemDefaultDevice() {
+                reading.deviceName = device.name
+                reading.recommendedWorkingSet = device.recommendedMaxWorkingSetSize
+            }
+            return .success(reading)
+        }
         catch { return .failure(error) }
     }
 }

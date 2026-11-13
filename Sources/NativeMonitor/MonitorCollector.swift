@@ -28,11 +28,11 @@ final class MonitorCollector: @unchecked Sendable {
         let total = !corePercentages.isEmpty && validCores.count == corePercentages.count ? validCores.reduce((0.0, 0.0, 0.0)) { ($0.0 + $1.0, $0.1 + $1.1, $0.2 + $1.2) } : nil
         result[.cpu] = MetricReading(date: date, value: total.map { $0.0 + $0.1 }, status: total == nil ? "等待 CPU 采样" : "核心使用率之和", facts: [
             Fact(label: "用户", value: Self.text(total?.0, suffix: "%")), Fact(label: "系统", value: Self.text(total?.1, suffix: "%")), Fact(label: "空闲", value: Self.text(total?.2, suffix: "%"))
-        ], rows: [Fact(label: "逻辑核心", value: "\(cpu?.count ?? 0)"), Fact(label: "运行时间", value: Self.text(uptime / 3600, suffix: "小时")), Fact(label: "系统负载（1 / 5 / 15 分钟）", value: loadCount == 3 ? loads.map { $0.formatted(.number.precision(.fractionLength(2))) }.joined(separator: " / ") : "—")], cores: corePercentages.map { $0.map { $0.0 + $0.1 } }, cpuParts: total.map { [$0.0, $0.1, $0.2] } ?? [])
+        ], rows: [Fact(label: "逻辑核心", value: "\(cpu?.count ?? 0)"), Fact(label: "运行时间", value: Self.text(uptime / 3600, suffix: "小时")), Fact(label: "系统负载（1 / 5 / 15 分钟）", value: loadCount == 3 ? loads.map { $0.formatted(.number.precision(.fractionLength(2))) }.joined(separator: " / ") : "—")], cores: corePercentages.map { $0.map { $0.0 + $0.1 } }, cpuParts: total.map { [$0.0, $0.1, $0.2] } ?? [], series: total.map { ["用户": $0.0, "系统": $0.1] } ?? [:])
         if let memory = SystemReader.memory() {
             result[.memory] = MetricReading(date: date, value: Double(memory.used) / 1e9, status: "活跃 + 不可换出 + 压缩", facts: [
                 Fact(label: "物理内存", value: Self.bytes(memory.total)), Fact(label: "压缩", value: Self.bytes(memory.compressed)), Fact(label: "交换已用", value: Self.bytes(memory.swapUsed))
-            ], rows: [Fact(label: "活跃", value: Self.bytes(memory.active)), Fact(label: "不可换出", value: Self.bytes(memory.wired)), Fact(label: "非活跃页", value: Self.bytes(memory.inactive)), Fact(label: "空闲页", value: Self.bytes(memory.free)), Fact(label: "已用比例", value: Self.text(Double(memory.used) / Double(memory.total) * 100, suffix: "%"))])
+            ], rows: [Fact(label: "活跃", value: Self.bytes(memory.active)), Fact(label: "不可换出", value: Self.bytes(memory.wired)), Fact(label: "非活跃页", value: Self.bytes(memory.inactive)), Fact(label: "空闲页", value: Self.bytes(memory.free)), Fact(label: "已用比例", value: Self.text(Double(memory.used) / Double(memory.total) * 100, suffix: "%"))], series: ["活跃": Double(memory.active) / 1e9, "不可换出": Double(memory.wired) / 1e9, "压缩": Double(memory.compressed) / 1e9])
         } else { result[.memory] = Self.unavailable(date, "内存数据不可用") }
         let disk = SystemReader.disk()
         let diskRates = disk.flatMap { current in previousDisk.flatMap { current.rates(since: $0.1, seconds: uptime - $0.0) } }
@@ -40,7 +40,7 @@ final class MonitorCollector: @unchecked Sendable {
         let volume = SystemReader.volume()
         result[.disk] = MetricReading(date: date, value: diskRates.map { $0.0 / 1e6 }, status: disk == nil ? "磁盘计数器不可用" : diskRates == nil ? "等待磁盘采样" : "设备读取速率", facts: [
             Fact(label: "读取", value: diskRates.map { ValueFormat.rate($0.0, precision: 1) } ?? "—"), Fact(label: "写入", value: diskRates.map { ValueFormat.rate($0.1, precision: 1) } ?? "—"), Fact(label: "可用容量", value: Self.bytes(volume?.available))
-        ], rows: [Fact(label: "主目录卷总容量", value: Self.bytes(volume?.total)), Fact(label: "主目录卷可用", value: Self.bytes(volume?.available)), Fact(label: "设备累计读取", value: Self.bytes(disk?.first)), Fact(label: "设备累计写入", value: Self.bytes(disk?.second))])
+        ], rows: [Fact(label: "主目录卷总容量", value: Self.bytes(volume?.total)), Fact(label: "主目录卷可用", value: Self.bytes(volume?.available)), Fact(label: "设备累计读取", value: Self.bytes(disk?.first)), Fact(label: "设备累计写入", value: Self.bytes(disk?.second))], series: diskRates.map { ["读取": $0.0 / 1e6, "写入": $0.1 / 1e6] } ?? [:])
         let interfaces = SystemReader.network()
         var networkRates: (Double, Double)?
         if let interfaces, !interfaces.isEmpty, let old = previousNetwork,
@@ -54,16 +54,22 @@ final class MonitorCollector: @unchecked Sendable {
         let sent = interfaces?.reduce(UInt64(0)) { $0 &+ $1.counters.second }
         result[.network] = MetricReading(date: date, value: networkRates.map { $0.0 / 1e6 }, status: networkStatus, facts: [
             Fact(label: "接收", value: networkRates.map { ValueFormat.rate($0.0, precision: 1) } ?? "—"), Fact(label: "发送", value: networkRates.map { ValueFormat.rate($0.1, precision: 1) } ?? "—"), Fact(label: "接口数", value: interfaces.map { "\($0.count)" } ?? "—")
-        ], rows: [Fact(label: "运行中接口", value: interfaces.map { $0.isEmpty ? "无" : $0.map(\.name).joined(separator: ", ") } ?? "—"), Fact(label: "接口累计接收", value: Self.bytes(received)), Fact(label: "接口累计发送", value: Self.bytes(sent))])
+        ], rows: [Fact(label: "运行中接口", value: interfaces.map { $0.isEmpty ? "无" : $0.map(\.name).joined(separator: ", ") } ?? "—"), Fact(label: "接口累计接收", value: Self.bytes(received)), Fact(label: "接口累计发送", value: Self.bytes(sent))], series: networkRates.map { ["接收": $0.0 / 1e6, "发送": $0.1 / 1e6] } ?? [:])
         return result
     }
     static func readGPU() -> MetricReading {
         let date = Date()
         switch GPUReader.read() {
         case .success(let gpu):
+            var series = ["设备": gpu.utilization]
+            if let value = gpu.renderer { series["渲染器"] = value }
+            if let value = gpu.tiler { series["分块器"] = value }
             return MetricReading(date: date, value: gpu.utilization, status: "设备利用率", facts: [
-                Fact(label: "渲染器", value: Self.text(gpu.renderer, suffix: "%")), Fact(label: "分块器", value: Self.text(gpu.tiler, suffix: "%")), Fact(label: "数据源", value: "驱动计数器")
-            ], rows: [Fact(label: "数据源", value: "IORegistry · PerformanceStatistics"), Fact(label: "驱动", value: gpu.driver), Fact(label: "最后更新", value: date.formatted(date: .omitted, time: .standard))])
+                Fact(label: "渲染器", value: Self.text(gpu.renderer, suffix: "%")), Fact(label: "分块器", value: Self.text(gpu.tiler, suffix: "%")), Fact(label: "驱动已用系统内存", value: Self.bytes(gpu.usedMemory))
+            ], rows: [Fact(label: "设备", value: gpu.deviceName ?? "—"), Fact(label: "驱动", value: gpu.driver),
+                      Fact(label: "驱动分配系统内存", value: Self.bytes(gpu.allocatedMemory)),
+                      Fact(label: "Metal 建议工作集", value: Self.bytes(gpu.recommendedWorkingSet)),
+                      Fact(label: "数据源", value: "IORegistry · PerformanceStatistics"), Fact(label: "最后更新", value: date.formatted(date: .omitted, time: .standard))], series: series)
         case .failure(let error): return Self.unavailable(date, error.localizedDescription)
         }
     }
