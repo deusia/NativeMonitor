@@ -18,6 +18,8 @@ CPU 详情根据系统的逻辑核心簇 ID 分组，默认折叠；簇总量为
 
 传感器详情优先展示风扇转速及局部平均温度，原始温度默认收起并按系统键名前缀分组。M5 系列的 CPU、GPU 测点名称参考 [Stats](https://github.com/exelban/stats/blob/master/Modules/Sensors/values.swift)，分别对可用的对应测点等权平均，排除不大于 0°C 或高于 110°C 的读数；该值并非整机温度，也不是最高温度。映射并非 Apple 官方定义，其他机型暂不计算平均值，未识别的键保留原名，前缀不代表确定的硬件部件。读数来自 AppleSMC；可读取的项目因机型和系统版本而异，无风扇设备可能没有转速。AppleSMC 为私有接口，不支持的读数不会展示，接口不可用时显示提示。
 
+电池、无线和存储的部分键名参考 [VirtualSMC](https://github.com/acidanthera/VirtualSMC/blob/master/Docs/SMCSensorKeys.txt) 与 [MacMonitor](https://github.com/ryyansafar/MacMonitor/blob/main/SENSORS.md)，属于跨机型参考而非 M5 Max 的官方位置说明。核心簇测点不一定对应单个核心；附近测点不一定是部件内部温度。无法识别的键标为“部件未知”。
+
 系统指标、GPU 及传感器分别在后台采样，采样间隔可设为 1、2 或 5 秒；某一采样长时间阻塞时显示超时，并不重复堆积请求。历史仅保存在内存中，退出后消失。无网络上传或特权 helper。
 
 ## 操作

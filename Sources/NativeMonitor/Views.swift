@@ -682,7 +682,7 @@ struct Details: View {
                 Divider()
                 DisclosureGroup("温度传感器 · \(temperatureCount) 项") {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("按系统键名前缀分组；未识别的键不代表确定的硬件部件。测点名称为第三方参考，并非 Apple 官方定义。")
+                        Text("按系统键名前缀分组；测点名称为第三方参考，并非 Apple 官方定义。核心簇测点不一定对应单个核心；附近测点不一定是部件内部温度。")
                             .font(.caption).foregroundStyle(.secondary)
                         if groups.isEmpty { Text("未发现可读取的温度传感器").font(.callout).foregroundStyle(.secondary) }
                         ForEach(groups, id: \.key) { group in

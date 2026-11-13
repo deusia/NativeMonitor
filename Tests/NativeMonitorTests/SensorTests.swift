@@ -17,7 +17,10 @@ final class SensorTests: XCTestCase {
         XCTAssertEqual(SensorReading.temperatureAverage(readings, chip: "Apple M5 Max", gpu: true)?.value, 70)
         XCTAssertNil(SensorReading.temperatureAverage(readings, chip: "Apple M4 Max", gpu: false))
         XCTAssertNil(SensorReading.temperatureAverage([], chip: "Apple M5 Max", gpu: false))
-        XCTAssertEqual(SensorReading.m5SensorName("Tp0O", chip: "Apple M5 Max"), "CPU 性能核心测点 1")
+        XCTAssertEqual(SensorReading.m5SensorName("Tp0O", chip: "Apple M5 Max"), "CPU 性能核心簇测点 1")
+        XCTAssertEqual(SensorReading.m5SensorName("TB0T", chip: "Apple M5 Max"), "电池温度测点")
+        XCTAssertEqual(SensorReading.m5SensorName("TW0P", chip: "Apple M5 Max"), "无线模块附近测点")
+        XCTAssertNil(SensorReading.m5SensorName("TD00", chip: "Apple M5 Max"))
         XCTAssertNil(SensorReading.m5SensorName("Tp0O", chip: "Apple M4 Max"))
     }
     func testDecodeSensorValues() {
@@ -40,7 +43,7 @@ final class SensorTests: XCTestCase {
         XCTAssertEqual(groups[1].readings.map(\.id), ["TB0T", "TB1T"])
         XCTAssertTrue(SensorReading.temperatureGroups([]).isEmpty)
         XCTAssertEqual(readings[1].displayName, "风扇 1（F0Ac）")
-        XCTAssertEqual(readings[0].displayName, "TB1T")
+        XCTAssertTrue(readings[0].displayName.hasSuffix("（TB1T）"))
         XCTAssertEqual(SensorReading(id: "FZAc", value: 0, unit: "rpm").displayName, "FZAc")
     }
 }

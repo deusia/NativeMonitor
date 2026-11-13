@@ -20,9 +20,18 @@ struct SensorReading: Identifiable {
     static func m5SensorName(_ id: String, chip: String) -> String? {
         guard ["Apple M5", "Apple M5 Pro", "Apple M5 Max", "Apple M5 Ultra"].contains(chip) else { return nil }
         if let index = m5CPU.firstIndex(of: id) {
-            return index < 6 ? "CPU 超级核心测点 \(index + 1)" : "CPU 性能核心测点 \(index - 5)"
+            return index < 6 ? "CPU 超级核心簇测点 \(index + 1)" : "CPU 性能核心簇测点 \(index - 5)"
         }
         if let index = m5GPU.firstIndex(of: id) { return "GPU 测点 \(index + 1)" }
+        // 这些名称是第三方跨机型参考，并不保证物理位置或传感器类型一致。
+        switch id {
+        case "TB0T": return "电池温度测点"
+        case "TB1T": return "电池温度测点 1"
+        case "TB2T": return "电池温度测点 2"
+        case "TW0P": return "无线模块附近测点"
+        case "TH0x": return "存储设备温度最大值"
+        default: break
+        }
         return nil
     }
 
@@ -35,7 +44,7 @@ struct SensorReading: Identifiable {
     }
 
     var displayName: String {
-        if unit == "°C", let name = Self.m5SensorName(id, chip: Self.chipName) { return "\(name)（\(id)）" }
+        if unit == "°C" { return "\(Self.m5SensorName(id, chip: Self.chipName) ?? "部件未知")（\(id)）" }
         guard unit == "rpm", id.count == 4, id.first == "F", id.hasSuffix("Ac"),
               let index = Int(String(id.dropFirst().prefix(1)), radix: 16) else { return id }
         return "风扇 \(index + 1)（\(id)）"
