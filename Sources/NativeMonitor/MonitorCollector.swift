@@ -13,6 +13,10 @@ final class MonitorCollector: @unchecked Sendable {
         guard let value else { return "—" }
         return Self.text(Double(value) / 1_000_000_000, suffix: "GB")
     }
+    private static func memoryBytes(_ value: UInt64?) -> String {
+        guard let value else { return "—" }
+        return Self.text(ValueFormat.memoryGigabytes(value), suffix: "GB")
+    }
     func read() -> [Metric: MetricReading] {
         let date = Date(), uptime = ProcessInfo.processInfo.systemUptime
         var result: [Metric: MetricReading] = [:]
@@ -30,9 +34,9 @@ final class MonitorCollector: @unchecked Sendable {
             Fact(label: "用户", value: Self.text(total?.0, suffix: "%")), Fact(label: "系统", value: Self.text(total?.1, suffix: "%")), Fact(label: "空闲", value: Self.text(total?.2, suffix: "%"))
         ], rows: [Fact(label: "逻辑核心", value: "\(cpu?.count ?? 0)"), Fact(label: "运行时间", value: Self.text(uptime / 3600, suffix: "小时")), Fact(label: "系统负载（1 / 5 / 15 分钟）", value: loadCount == 3 ? loads.map { $0.formatted(.number.precision(.fractionLength(2))) }.joined(separator: " / ") : "—")], cores: corePercentages.map { $0.map { $0.0 + $0.1 } }, cpuParts: total.map { [$0.0, $0.1, $0.2] } ?? [], series: total.map { ["用户": $0.0, "系统": $0.1] } ?? [:])
         if let memory = SystemReader.memory() {
-            result[.memory] = MetricReading(date: date, value: Double(memory.used) / 1e9, status: "活跃 + 不可换出 + 压缩", facts: [
-                Fact(label: "物理内存", value: Self.bytes(memory.total)), Fact(label: "压缩", value: Self.bytes(memory.compressed)), Fact(label: "交换已用", value: Self.bytes(memory.swapUsed))
-            ], rows: [Fact(label: "活跃", value: Self.bytes(memory.active)), Fact(label: "不可换出", value: Self.bytes(memory.wired)), Fact(label: "非活跃页", value: Self.bytes(memory.inactive)), Fact(label: "空闲页", value: Self.bytes(memory.free)), Fact(label: "已用比例", value: Self.text(Double(memory.used) / Double(memory.total) * 100, suffix: "%"))], series: ["活跃": Double(memory.active) / 1e9, "非活跃": Double(memory.inactive) / 1e9, "不可换出": Double(memory.wired) / 1e9, "压缩": Double(memory.compressed) / 1e9, "空闲": Double(memory.free) / 1e9])
+            result[.memory] = MetricReading(date: date, value: ValueFormat.memoryGigabytes(memory.used), status: "活跃 + 不可换出 + 压缩", facts: [
+                Fact(label: "物理内存", value: Self.memoryBytes(memory.total)), Fact(label: "压缩", value: Self.memoryBytes(memory.compressed)), Fact(label: "交换已用", value: Self.memoryBytes(memory.swapUsed))
+            ], rows: [Fact(label: "活跃", value: Self.memoryBytes(memory.active)), Fact(label: "不可换出", value: Self.memoryBytes(memory.wired)), Fact(label: "非活跃页", value: Self.memoryBytes(memory.inactive)), Fact(label: "空闲页", value: Self.memoryBytes(memory.free)), Fact(label: "已用比例", value: Self.text(Double(memory.used) / Double(memory.total) * 100, suffix: "%"))], series: ["活跃": ValueFormat.memoryGigabytes(memory.active), "非活跃": ValueFormat.memoryGigabytes(memory.inactive), "不可换出": ValueFormat.memoryGigabytes(memory.wired), "压缩": ValueFormat.memoryGigabytes(memory.compressed), "空闲": ValueFormat.memoryGigabytes(memory.free)])
         } else { result[.memory] = Self.unavailable(date, "内存数据不可用") }
         let disk = SystemReader.disk()
         let diskRates = disk.flatMap { current in previousDisk.flatMap { current.rates(since: $0.1, seconds: uptime - $0.0) } }
