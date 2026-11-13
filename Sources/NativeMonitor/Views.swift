@@ -647,6 +647,8 @@ struct Details: View {
         let fans = model.sensors.filter { $0.unit == "rpm" }
         let groups = SensorReading.temperatureGroups(model.sensors)
         let temperatureCount = groups.reduce(0) { $0 + $1.readings.count }
+        let cpuAverage = SensorReading.temperatureAverage(model.sensors, chip: SensorReading.chipName, gpu: false)
+        let gpuAverage = SensorReading.temperatureAverage(model.sensors, chip: SensorReading.chipName, gpu: true)
         return VStack(alignment: .leading, spacing: 20) {
             Label("传感器", systemImage: "thermometer.medium").font(.system(size: 22, weight: .semibold))
             if !model.sensorStatus.isEmpty { Text(model.sensorStatus).font(.callout).foregroundStyle(.secondary) }
@@ -660,9 +662,27 @@ struct Details: View {
                     }
                 }
                 Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("局部平均温度", systemImage: "thermometer.medium").font(.headline)
+                    ForEach([false, true], id: \.self) { gpu in
+                        if let average = gpu ? gpuAverage : cpuAverage {
+                            HStack {
+                                Text("\(gpu ? "GPU" : "CPU") · \(average.count) 个测点")
+                                Spacer()
+                                Text("\(ValueFormat.number(average.value, precision: model.precision)) °C").monospacedDigit()
+                            }.font(.callout)
+                        }
+                    }
+                    if cpuAverage == nil && gpuAverage == nil {
+                        Text("当前机型没有可用的已识别测点").font(.callout).foregroundStyle(.secondary)
+                    }
+                    Text("参考 Stats 的 M5 系列测点映射，按可用读数等权平均；不是整机或最高温度。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Divider()
                 DisclosureGroup("温度传感器 · \(temperatureCount) 项") {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("按系统键名前缀分组；前缀不代表确定的硬件部件。")
+                        Text("按系统键名前缀分组；未识别的键不代表确定的硬件部件。测点名称为第三方参考，并非 Apple 官方定义。")
                             .font(.caption).foregroundStyle(.secondary)
                         if groups.isEmpty { Text("未发现可读取的温度传感器").font(.callout).foregroundStyle(.secondary) }
                         ForEach(groups, id: \.key) { group in

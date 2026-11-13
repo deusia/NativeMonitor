@@ -2,6 +2,24 @@ import XCTest
 @testable import NativeMonitor
 
 final class SensorTests: XCTestCase {
+    func testM5TemperatureMappingAndAverage() {
+        let readings = [
+            SensorReading(id: "Tp00", value: 40, unit: "°C"),
+            SensorReading(id: "Tp0O", value: 60, unit: "°C"),
+            SensorReading(id: "Tp04", value: 0, unit: "°C"),
+            SensorReading(id: "Tp08", value: 111, unit: "°C"),
+            SensorReading(id: "Tg0U", value: 70, unit: "°C"),
+            SensorReading(id: "Tp99", value: 100, unit: "°C")
+        ]
+        let cpu = SensorReading.temperatureAverage(readings, chip: "Apple M5 Max", gpu: false)
+        XCTAssertEqual(cpu?.value, 50)
+        XCTAssertEqual(cpu?.count, 2)
+        XCTAssertEqual(SensorReading.temperatureAverage(readings, chip: "Apple M5 Max", gpu: true)?.value, 70)
+        XCTAssertNil(SensorReading.temperatureAverage(readings, chip: "Apple M4 Max", gpu: false))
+        XCTAssertNil(SensorReading.temperatureAverage([], chip: "Apple M5 Max", gpu: false))
+        XCTAssertEqual(SensorReading.m5SensorName("Tp0O", chip: "Apple M5 Max"), "CPU 性能核心测点 1")
+        XCTAssertNil(SensorReading.m5SensorName("Tp0O", chip: "Apple M4 Max"))
+    }
     func testDecodeSensorValues() {
         XCTAssertEqual(SensorReader.decode([0x2a, 0x80], type: "sp78"), 42.5)
         XCTAssertEqual(SensorReader.decode([0xff, 0x00], type: "sp78"), -1)
