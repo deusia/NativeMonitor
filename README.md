@@ -2,17 +2,15 @@
 
 面向 Apple Silicon 的 macOS 菜单栏性能监控原型，使用 SwiftUI、AppKit 和系统计数器。CPU、GPU、内存、磁盘和网络显示本机采样数据；GPU 驱动计数器和 ANE 功耗属于实验性数据源。
 
-## 快速开始
+## 使用 Xcode 构建
 
 需要 Apple Silicon Mac、Swift 6 工具链，以及包含 macOS 26 Glass API 的 Xcode SDK。最低部署版本为 macOS 14；macOS 26 及以上使用 Glass API。当前仅在开发机器的系统和 SDK 上验证。
 
-```sh
-swift test
-./build.sh
-open ../NativeMonitor.app
-```
+1. 在 Xcode 中打开 `NativeMonitor.xcodeproj`，选择 `NativeMonitor` scheme 和 My Mac。
+2. 按 ⌘R 构建并运行，或按 ⌘U 运行测试。构建产物可通过 Product → Show Build Folder in Finder 查看，位于 `Products/Debug` 或 `Products/Release` 中。
+3. 选择 Product → Archive 生成归档，再在 Organizer 中通过 Distribute App 导出应用。也可以从归档的 `Products/Applications` 中找到 `.app`，复制到“应用程序”文件夹。
 
-构建脚本在仓库上级目录生成 `NativeMonitor.app`，使用本地 ad-hoc 签名；尚未进行 Developer ID 签名或公证。
+默认使用本地 ad-hoc 签名，适合在本机使用；向其他 Mac 分发需自行配置 Apple Developer 签名和公证。项目仅构建 arm64。原有 Swift Package 和脚本仍可用：`swift test` 运行测试，`./build.sh` 在仓库上级目录生成 `NativeMonitor.app`。
 
 ## 指标与口径
 

@@ -1,0 +1,4 @@
+module PrivateBackdrop {
+    header "PrivateBackdrop.h"
+    export *
+}
