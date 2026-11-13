@@ -10,6 +10,7 @@
 - 在 Instruments 图形界面选择 `Performance Limiters` 和即时处理后，GPU Counters 轨道没有结果；跟踪报告多条 `Cannot find GPU device for counter values` 和 `Cannot find GPU device for shader profiler values`。目前未确定具体原因。
 - 本机 Instruments 的 `GPUCounterGraph.plist` 定义了 `MXU Utilization`，显示名称为 `Neural Accelerator Utilization`，单位为峰值 Neural Accelerator 性能的百分比；定义存在不代表本机已成功采集。`xctrace` 的 `--show-recording-options` 未列出 Metal GPU Counters 的计数器组选项。
 - macOS 的 `metalperftrace listen --json` 可提供实时 Metal 性能信息；在本机监听 5 秒没有输出，尚不能确认能否提供该计数器或用于全系统监控。
+- 使用 Metal TensorOps 矩阵乘法测试负载重新录制，测试程序成功返回，Instruments 的 Metal Encoder Hierarchy 中也出现该进程；选择 `Performance Limiters` 后仍报告 `Cannot find GPU device for counter values`，未获得目标计数器。无法确定失败是否与权限、驱动或工具版本有关。
 - 录制进行时尝试 `xctrace export --toc` 返回 `Document Missing Template Error`。短时全系统跟踪会产生较大的临时文件和处理开销，因此本次没有找到可直接用作菜单栏秒级数据源的可靠路径。不能由这一实验断言其他版本的 Instruments 无法实时显示计数器。
 
 ## 独立 Apple Neural Engine
@@ -19,6 +20,7 @@
 - 受控模型包含五个卷积层，`MLComputePlan` 将这些层的首选设备标为 Neural Engine；测试分别运行了约 49,000 次无间隔预测和 332 次限速预测。**首选设备不证明每次实际执行位置**；在一次短时 ANE Instruments 跟踪中未得到推理执行区间，因此仍需能够确认硬件实际执行的对照负载。
 - 使用第三方 `aneperf/testworkload` 通过私有 ANE 接口执行身份模型，输出与输入一致；随后卷积测试成功执行约 44,000 次，但采样期间 `ANE0` 等分桶仍无增量。一次 Instruments 跟踪只看到模型编译与加载区间，没有捕获推理执行区间，不能据此确认该分桶的计算口径或运行位置。
 - 用户在终端执行 `sudo powermetrics -n 3 -i 1000 -s gpu_power,ane_power` 的三次采样中均有 GPU 结果，没有 ANE 数据；缺少 ANE 输出不能解释为零功耗。
+- 进一步在持续 ANE 卷积测试期间单独运行 `sudo powermetrics -n 3 -i 1000 -s ane_power`，三个采样均未输出 ANE 数值。该测试进程于 23:45:00 启动，采样时间为 23:45:26–23:45:28，测试最终报告约 189,000 次调用成功。
 - 全部分桶的驻留时间为零时无法计算比例，不能把它解释为 0% 或用电压状态、电源状态替代计算利用率。`powermetrics -s ane_power` 在本机要求超级用户权限；功率也不是利用率。
 
 ## 结论与后续验证
