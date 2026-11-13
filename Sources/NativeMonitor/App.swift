@@ -29,7 +29,6 @@ final class OverviewPanel: NSPanel {
     var overviewPanel: OverviewPanel!
     var outsideClickMonitor: Any?
     var localClickMonitor: Any?
-    var statusMoveObserver: NSObjectProtocol?
     var detailWindow: NSWindow?
     var subscriptions = Set<AnyCancellable>()
     var transitionIDs: [ObjectIdentifier: UUID] = [:]
@@ -58,14 +57,6 @@ final class OverviewPanel: NSPanel {
             if let self, self.overviewPanel.isVisible, event.window === self.detailWindow { self.hideOverview() }
             return event
         }
-        if let statusWindow = status.button?.window {
-            statusMoveObserver = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: statusWindow, queue: .main) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self, self.overviewPanel.isVisible, !self.closingWindows.contains(ObjectIdentifier(self.overviewPanel)) else { return }
-                    self.showOverview()
-                }
-            }
-        }
         model.$readings.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateStatus() }.store(in: &subscriptions)
         model.$cpuScale.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateStatus() }.store(in: &subscriptions)
         model.$precision.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateStatus() }.store(in: &subscriptions)
@@ -83,7 +74,6 @@ final class OverviewPanel: NSPanel {
         model.stop()
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
         if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
-        if let statusMoveObserver { NotificationCenter.default.removeObserver(statusMoveObserver) }
     }
     func present(_ window: NSWindow, frame: NSRect? = nil) {
         let key = ObjectIdentifier(window)

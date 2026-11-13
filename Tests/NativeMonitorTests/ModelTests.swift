@@ -107,7 +107,7 @@ final class ModelTests: XCTestCase {
         XCTAssertTrue(AppDelegate.shouldDismissOverview(at: NSPoint(x: 400, y: 460), panel: panel, status: nil))
     }
 
-    @MainActor func testOverviewFollowsMenuBarAfterStartup() throws {
+    @MainActor func testOverviewStaysInPlaceWhenMenuBarMoves() throws {
         _ = NSApplication.shared
         let delegate = AppDelegate()
         delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
@@ -125,6 +125,10 @@ final class ModelTests: XCTestCase {
         let expectedX = min(max(anchor.midX - panel.width / 2, screen.visibleFrame.minX + 8), screen.visibleFrame.maxX - panel.width - 8)
         XCTAssertEqual(panel.minX, expectedX, accuracy: 1)
         XCTAssertEqual(panel.maxY, anchor.minY - 6, accuracy: 1)
+        button.title += "宽宽"
+        NotificationCenter.default.post(name: NSWindow.didMoveNotification, object: statusWindow)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        XCTAssertEqual(delegate.overviewPanel.frame.origin.x, panel.origin.x, accuracy: 1)
         delegate.toggleOverview()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.55))
         XCTAssertFalse(delegate.overviewPanel.isVisible)
