@@ -698,15 +698,19 @@ struct Details: View {
         }
     }
     private func coreGrid(_ indices: [Int], cores: [Double?]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
             ForEach(indices, id: \.self) { index in
                 let value = cores[index]
                 let kind = model.coreLabels.flatMap { index < $0.count ? $0[index] : nil }
                 let color: Color = kind == "超能核" ? Color(red: 0.78, green: 0.47, blue: 0.98) : kind == "性能核" ? Color(red: 0.48, green: 0.32, blue: 0.9) : kind == "能效核" ? .teal : metricColor
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack { Text("\(kind ?? "核心") \(index + 1)"); Spacer(); Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit() }
+                    HStack {
+                        Text("\(kind ?? "核心") \(index + 1)").lineLimit(1).minimumScaleFactor(0.8)
+                        Spacer(minLength: 4)
+                        Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit().fixedSize()
+                    }
                     ProgressView(value: value ?? 0, total: 100).tint(color)
-                }.font(.caption).padding(10).modifier(ControlMaterial(reduce: model.reduceTransparency))
+                }.font(.caption).padding(10).frame(maxWidth: .infinity, minHeight: 64).modifier(ControlMaterial(reduce: model.reduceTransparency))
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
             }
