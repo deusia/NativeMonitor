@@ -330,6 +330,7 @@ struct RangePicker: View {
         HStack(spacing: 8) {
             if !quickRanges.contains(model.range) {
                 Text(model.range.label).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
                     .accessibilityLabel("当前历史范围：\(model.range.label)")
             }
             Group {
@@ -429,10 +430,7 @@ struct Overview: View {
         let snapshot = model.snapshot(metric)
         return Button { open(metric) } label: {
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Label(metric.rawValue, systemImage: metric.symbol).font(.system(size: 12, weight: .medium))
-                    Spacer()
-                }
+                Label(metric.rawValue, systemImage: metric.symbol).font(.system(size: 12, weight: .medium))
                 HStack(alignment: .firstTextBaseline) {
                     Text(snapshot.number).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
                         .contentTransition(.numericText(value: snapshot.value ?? 0))
@@ -646,25 +644,47 @@ struct Details: View {
     }
 
     private var sensorPage: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        let fans = model.sensors.filter { $0.unit == "rpm" }
+        let groups = SensorReading.temperatureGroups(model.sensors)
+        let temperatureCount = groups.reduce(0) { $0 + $1.readings.count }
+        return VStack(alignment: .leading, spacing: 20) {
             Label("传感器", systemImage: "thermometer.medium").font(.system(size: 22, weight: .semibold))
             if !model.sensorStatus.isEmpty { Text(model.sensorStatus).font(.callout).foregroundStyle(.secondary) }
-            ForEach(["°C", "rpm"], id: \.self) { unit in
-                let items = model.sensors.filter { $0.unit == unit }
-                if !items.isEmpty {
-                    Text(unit == "°C" ? "温度" : "风扇转速").font(.headline)
-                    ForEach(items) { sensor in
-                        HStack {
-                            Text(sensor.id)
-                            Spacer()
-                            Text("\(ValueFormat.number(sensor.value, precision: model.precision)) \(sensor.unit)").monospacedDigit()
-                        }.font(.callout)
+            if !model.sensors.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("风扇转速", systemImage: "fanblades").font(.headline)
+                    if fans.isEmpty {
+                        Text("未发现可读取的风扇转速").font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(fans) { sensor in sensorRow(sensor) }
                     }
                 }
+                Divider()
+                DisclosureGroup("温度传感器 · \(temperatureCount) 项") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("按系统键名前缀分组；前缀不代表确定的硬件部件。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if groups.isEmpty { Text("未发现可读取的温度传感器").font(.callout).foregroundStyle(.secondary) }
+                        ForEach(groups, id: \.key) { group in
+                            DisclosureGroup("\(group.key) 系列 · \(group.readings.count) 项") {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(group.readings) { sensor in sensorRow(sensor) }
+                                }.padding(.top, 10)
+                            }
+                        }
+                    }.padding(.top, 12)
+                }.font(.headline)
             }
             Text("数据来自 AppleSMC 私有接口，键名和可用项目因设备及系统版本而异；无风扇设备可能没有转速读数。")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+    private func sensorRow(_ sensor: SensorReading) -> some View {
+        HStack {
+            Text(sensor.displayName)
+            Spacer()
+            Text("\(ValueFormat.number(sensor.value, precision: model.precision)) \(sensor.unit)").monospacedDigit()
+        }.font(.callout)
     }
     private var hero: some View {
         let snapshot = model.snapshot(model.metric)

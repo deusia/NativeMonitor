@@ -5,6 +5,18 @@ struct SensorReading: Identifiable {
     let id: String
     let value: Double
     let unit: String
+
+    var displayName: String {
+        guard unit == "rpm", id.count == 4, id.first == "F", id.hasSuffix("Ac"),
+              let index = Int(String(id.dropFirst().prefix(1)), radix: 16) else { return id }
+        return "风扇 \(index + 1)（\(id)）"
+    }
+
+    // AppleSMC 键名没有公开的稳定部件映射，按前缀分组而不猜测硬件名称。
+    static func temperatureGroups(_ readings: [SensorReading]) -> [(key: String, readings: [SensorReading])] {
+        let groups = Dictionary(grouping: readings.filter { $0.unit == "°C" }) { String($0.id.prefix(2)) }
+        return groups.keys.sorted().map { (key: $0, readings: groups[$0]!.sorted { $0.id < $1.id }) }
+    }
 }
 
 // AppleSMC 是私有接口；只展示类型和数值均可识别的实际读数。
