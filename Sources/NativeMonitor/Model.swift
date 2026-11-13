@@ -42,7 +42,17 @@ struct Snapshot {
     var reading: String { value == nil ? "—" : "\(number) \(metric.unit)" }
     var status: String { current?.status ?? "等待真实样本" }
     var facts: [Fact] { current?.facts ?? [] }
-    var rows: [Fact] { current?.rows ?? [] }
+    var rows: [Fact] {
+        var result = current?.rows ?? []
+        let values = samples(.long).map(\.value)
+        if !values.isEmpty {
+            let average = values.reduce(0, +) / Double(values.count)
+            let peak = values.max() ?? 0
+            result.append(Fact(label: "启动后样本均值（最多 30 分钟）", value: "\(average.formatted(.number.precision(.fractionLength(0...2)))) \(metric.unit)"))
+            result.append(Fact(label: "启动后样本峰值（最多 30 分钟）", value: "\(peak.formatted(.number.precision(.fractionLength(0...2)))) \(metric.unit)"))
+        }
+        return result
+    }
     var maximum: Double {
         if metric == .cpu || metric == .gpu { return 100 }
         return max(1, (samples(.long).map(\.value).max() ?? value ?? 0) * 1.2)
@@ -84,6 +94,8 @@ struct Snapshot {
     private var timer: Timer?
     private var inFlight = false
     private var requestDate: Date?
+    private var gpuInFlight = false
+    private var gpuRequestDate: Date?
     private let collector = MonitorCollector()
 
     func start() {
@@ -99,30 +111,46 @@ struct Snapshot {
     private func refresh() {
         now = Date()
         if inFlight, requestDate.map({ now.timeIntervalSince($0) > 6 }) == true {
-            for metric in Metric.allCases { readings[metric] = MetricReading(date: now, value: nil, status: "采样超时，请重新打开程序", facts: [], rows: []); histories[metric] = [] }
+            for metric in Metric.allCases where metric != .gpu { setUnavailable(metric) }
         }
-        guard !inFlight else { return }
-        inFlight = true
-        requestDate = now
+        if gpuInFlight, gpuRequestDate.map({ now.timeIntervalSince($0) > 6 }) == true { setUnavailable(.gpu) }
         let collector = collector
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let results = collector.read()
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.inFlight = false
-                self.now = Date()
-                for metric in Metric.allCases {
-                    guard let reading = results[metric] else { continue }
-                    self.readings[metric] = reading
-                    if let value = reading.value {
-                        self.histories[metric, default: []].removeAll { self.now.timeIntervalSince($0.date) > 1800 }
-                        self.histories[metric, default: []].append(TimedValue(date: reading.date, value: value))
-                    } else {
-                        self.histories[metric] = []
-                    }
+        if !inFlight {
+            inFlight = true
+            requestDate = now
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let results = collector.read()
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.inFlight = false
+                    for (metric, reading) in results { self.record(reading, for: metric) }
                 }
             }
         }
+        if !gpuInFlight {
+            gpuInFlight = true
+            gpuRequestDate = now
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let reading = MonitorCollector.readGPU()
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.gpuInFlight = false
+                    self.record(reading, for: .gpu)
+                }
+            }
+        }
+    }
+    private func setUnavailable(_ metric: Metric) {
+        readings[metric] = MetricReading(date: now, value: nil, status: "采样超时，请重新打开程序", facts: [], rows: [])
+        histories[metric] = []
+    }
+    private func record(_ reading: MetricReading, for metric: Metric) {
+        now = Date()
+        readings[metric] = reading
+        if let value = reading.value {
+            histories[metric, default: []].removeAll { now.timeIntervalSince($0.date) > 1800 }
+            histories[metric, default: []].append(TimedValue(date: reading.date, value: value))
+        } else { histories[metric] = [] }
     }
     func snapshot(_ metric: Metric) -> Snapshot {
         Snapshot(metric: metric, current: readings[metric], history: histories[metric] ?? [], now: now)

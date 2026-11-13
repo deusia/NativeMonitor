@@ -30,6 +30,7 @@ struct MemoryReading {
     let total: UInt64
     let used: UInt64
     let active: UInt64
+    let inactive: UInt64
     let wired: UInt64
     let compressed: UInt64
     let free: UInt64
@@ -68,7 +69,7 @@ struct SystemReader {
         var swap = xsw_usage(), size = MemoryLayout<xsw_usage>.size
         let swapUsed = sysctlbyname("vm.swapusage", &swap, &size, nil, 0) == 0 ? swap.xsu_used : nil
         // 已用口径为活跃、不可换出和压缩页，不将文件缓存当作已用。
-        return MemoryReading(total: total, used: active + wired + compressed, active: active, wired: wired, compressed: compressed, free: free, swapUsed: swapUsed)
+        return MemoryReading(total: total, used: active + wired + compressed, active: active, inactive: UInt64(info.inactive_count) * page, wired: wired, compressed: compressed, free: free, swapUsed: swapUsed)
     }
     static func volume() -> VolumeReading? {
         var stats = statfs()
@@ -88,7 +89,7 @@ struct SystemReader {
                   entry.ifa_flags & UInt32(IFF_UP) != 0, entry.ifa_flags & UInt32(IFF_RUNNING) != 0,
                   entry.ifa_flags & UInt32(IFF_LOOPBACK) == 0 else { continue }
             let name = String(cString: entry.ifa_name)
-            // 只统计硬件网络接口，避免 VPN 和桥接流量重复计算。
+            // 限定 en 前缀，避免将常见 VPN 和桥接接口与底层接口重复计数。
             if name.hasPrefix("en") { names[if_nametoindex(name)] = name }
         }
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
@@ -110,6 +111,7 @@ struct SystemReader {
             }
             offset += length
         }
+        guard result.count == names.count else { return nil }
         return result.sorted { $0.name < $1.name }
     }
     static func disk() -> Counters? {

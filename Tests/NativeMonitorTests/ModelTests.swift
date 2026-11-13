@@ -165,6 +165,8 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(snapshot.samples(.short).map(\.value), [0])
         XCTAssertEqual(snapshot.samples(.long).count, 2)
         XCTAssertEqual(snapshot.value, 0)
+        XCTAssertEqual(snapshot.rows.first(where: { $0.label.contains("均值") })?.value, "7.5 MB/s")
+        XCTAssertEqual(snapshot.rows.first(where: { $0.label.contains("峰值") })?.value, "15 MB/s")
         snapshot.current = nil
         XCTAssertTrue(snapshot.samples(.short).isEmpty)
         XCTAssertNil(snapshot.value)

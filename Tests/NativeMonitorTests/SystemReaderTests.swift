@@ -47,6 +47,6 @@ final class SystemReaderTests: XCTestCase {
         if let interfaces = SystemReader.network(), !interfaces.isEmpty {
             XCTAssertGreaterThanOrEqual(try XCTUnwrap(second[.network]?.value), 0)
         }
-        XCTAssertNotNil(second[.gpu])
+        XCTAssertFalse(MonitorCollector.readGPU().status.isEmpty)
     }
 }
