@@ -185,7 +185,7 @@ struct Trend: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: samples)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.rawValue) 分钟，\(snapshot.missingReason ?? snapshot.reading)，\(snapshot.sourceLabel)")
+        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.rawValue) 分钟，\(snapshot.missingReason ?? snapshot.reading)")
     }
 }
 struct DetailSeriesChart: View {
@@ -369,10 +369,7 @@ struct Overview: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("性能概览").font(.headline)
-                    Text("本机实时采样 · GPU 为实验性数据").font(.system(size: 11))
-                }
+                Text("性能概览").font(.headline)
                 Spacer()
                 Button { showSettings.toggle() } label: { Image(systemName: "slider.horizontal.3") }
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
@@ -394,7 +391,7 @@ struct Overview: View {
                 metricCard(.network).gridCellColumns(2)
             }
             HStack {
-                Button("退出原型", action: quit).buttonStyle(.link)
+                Button("退出", action: quit).buttonStyle(.link)
                 Spacer()
                 Button("打开详情窗口") { open(model.metric) }
                     .modifier(GlassButton(reduce: model.reduceTransparency)).keyboardShortcut("1", modifiers: .command)
@@ -410,7 +407,6 @@ struct Overview: View {
                 HStack {
                     Label(metric.rawValue, systemImage: metric.symbol).font(.system(size: 12, weight: .medium))
                     Spacer()
-                    Text("实时").font(.system(size: 10))
                 }
                 HStack(alignment: .firstTextBaseline) {
                     Text(snapshot.number).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
@@ -426,7 +422,7 @@ struct Overview: View {
         }.modifier(GlassButton(reduce: model.reduceTransparency, card: true))
             .modifier(GlassReveal(presented: model.overviewPresented, delay: 0.04 + Double(Metric.allCases.firstIndex(of: metric) ?? 0) * 0.02))
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("查看\(metric.rawValue)详情，\(snapshot.reading)，\(snapshot.sourceLabel)")
+            .accessibilityLabel("查看\(metric.rawValue)详情，\(snapshot.reading)")
             .accessibilityIdentifier("overview-\(metric.id)")
             .accessibilityAddTraits(.isButton)
     }
@@ -502,10 +498,6 @@ struct Details: View {
                     }
                     Spacer()
                 }.padding(.horizontal, 10).padding(.top, 14)
-                Text("本机实时采样\nGPU 为实验性数据")
-                    .font(.system(size: 11)).foregroundStyle(.primary)
-                    .padding(12).modifier(ControlMaterial(reduce: model.reduceTransparency))
-                    .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.14)).padding(10)
             }
             .frame(width: 190).frame(maxHeight: .infinity)
             }
@@ -530,7 +522,7 @@ struct Details: View {
                         Text(model.snapshot(model.metric).note)
                             .font(.callout).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-                        Text("图表仅显示本次启动后的真实样本，最多保留 30 分钟。")
+                        Text("图表显示本次运行的数据，最多保留 30 分钟。")
                             .font(.caption).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 5)
                     }.font(.caption).foregroundStyle(.primary)
@@ -643,8 +635,7 @@ struct Details: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 5) {
                     Text(snapshot.status).font(.callout)
-                    Text(snapshot.sourceLabel).font(.caption).foregroundStyle(.primary)
-                    Text("最多 \(model.range.rawValue) 分钟 · 启动后实测").font(.caption2).foregroundStyle(.primary)
+                    Text("最多 \(model.range.rawValue) 分钟").font(.caption2).foregroundStyle(.primary)
                 }.padding(.bottom, 5)
             }
         }
@@ -665,10 +656,6 @@ struct Details: View {
         return VStack(alignment: .leading, spacing: 12) {
             Label("CPU 核心簇", systemImage: "square.grid.3x3.fill").font(.headline)
             if cores.isEmpty { Text("等待核心采样").foregroundStyle(.secondary) }
-            if model.coreLabels != nil {
-                Text("簇来自系统拓扑，核心类型根据拓扑和核心数量推断。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             if let clusters = model.coreClusters, !cores.isEmpty {
                 ForEach(clusters) { cluster in
                     let kind = cluster.indices.first.flatMap { index in model.coreLabels.flatMap { index < $0.count ? $0[index] : nil } }
@@ -731,12 +718,12 @@ struct Details: View {
                     Label("Apple Neural Engine", systemImage: "brain")
                     Text("独立神经网络引擎")
                     Text(model.snapshot(.gpu).current?.anePower.map { "平均功耗：\(ValueFormat.number($0, precision: 2)) W" } ?? "平均功耗：暂不可用")
-                    Text("实时利用率：暂不可读取").foregroundStyle(.secondary)
+                    Text("利用率：暂不可读取").foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, minHeight: 72, alignment: .leading).padding(12)
                     .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
             }.font(.caption)
             HStack {
-                Text("GPU 核心数（驱动掩码）")
+                Text("GPU 核心数")
                 Spacer()
                 Text(capabilities.coreCount.map { "\($0)" } ?? "—").monospacedDigit()
                 Text("· 光线追踪")
@@ -746,13 +733,13 @@ struct Details: View {
     }
     private var comparison: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack { Text("趋势对照").font(.system(size: 13, weight: .medium)); Spacer(); Text("独立量纲 · 实时采样").font(.caption).foregroundStyle(.primary) }
+            HStack { Text("趋势对照").font(.system(size: 13, weight: .medium)); Spacer(); Text("不同单位").font(.caption).foregroundStyle(.primary) }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8)], spacing: 8) {
                 ForEach(Metric.allCases) { metric in
                     let snapshot = model.snapshot(metric)
                     Button { selectMetric(metric) } label: {
                         VStack(alignment: .leading, spacing: 9) {
-                            Text("\(metric.rawValue) · 实时").font(.caption).foregroundStyle(.primary)
+                            Text(metric.rawValue).font(.caption).foregroundStyle(.primary)
                             Text(snapshot.reading).font(.system(size: 14, weight: .medium)).monospacedDigit()
                                 .contentTransition(.numericText(value: snapshot.value ?? 0))
                                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)

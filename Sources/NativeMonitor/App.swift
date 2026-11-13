@@ -44,7 +44,7 @@ final class OverviewPanel: NSPanel {
         status.button?.action = #selector(toggleOverview)
         status.button?.font = statusFont
         status.button?.setAccessibilityLabel("性能监控，点击打开概览")
-        status.button?.toolTip = "性能监控 · 实时采样"
+        status.button?.toolTip = "性能监控"
         overviewPanel = OverviewPanel(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
         overviewPanel.isOpaque = false
         overviewPanel.backgroundColor = .clear
@@ -172,7 +172,7 @@ final class OverviewPanel: NSPanel {
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(sender); return false }
     func updateStatus() {
         status.button?.title = StatusReadout.title(model)
-        status.button?.toolTip = "实时采样 · CPU / 内存 / 接收"
+        status.button?.toolTip = "CPU / 内存 / 接收"
     }
     @objc func toggleOverview() { overviewPanel.isVisible && !closingWindows.contains(ObjectIdentifier(overviewPanel)) ? hideOverview() : showOverview() }
     func hideOverview() {
@@ -242,7 +242,7 @@ final class OverviewPanel: NSPanel {
         let overview = NSMenuItem(title: "显示概览", action: #selector(toggleOverview), keyEquivalent: "o"); overview.target = self; appMenu.addItem(overview)
         let details = NSMenuItem(title: "打开详情", action: #selector(openDetails), keyEquivalent: "1"); details.target = self; appMenu.addItem(details)
         appMenu.addItem(.separator())
-        appMenu.addItem(NSMenuItem(title: "退出性能监控原型", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appMenu.addItem(NSMenuItem(title: "退出性能监控", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         NSApp.mainMenu = menu
     }
 }

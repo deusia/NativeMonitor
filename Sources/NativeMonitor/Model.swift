@@ -63,7 +63,6 @@ struct Snapshot {
     var cpuScale: CPUScale = .total
     var precision: Int = 1
     var cpuFactor: Double { metric == .cpu && cpuScale == .average ? 1 / Double(max(current?.cores.count ?? 0, 1)) : 1 }
-    var sourceLabel: String { metric == .gpu ? "实验性实时 · IORegistry" : "本机实时采样" }
     var missingReason: String? { current?.value == nil ? (current?.status ?? "等待真实样本") : nil }
     var value: Double? { current?.value.map { $0 * cpuFactor } }
     var formatted: (String, String) {
@@ -89,8 +88,8 @@ struct Snapshot {
         if !values.isEmpty {
             let average = values.reduce(0, +) / Double(values.count)
             let peak = values.max() ?? 0
-            result.append(Fact(label: "启动后样本均值（最多 30 分钟）", value: ValueFormat.reading(average, metric: metric, precision: precision)))
-            result.append(Fact(label: "启动后样本峰值（最多 30 分钟）", value: ValueFormat.reading(peak, metric: metric, precision: precision)))
+            result.append(Fact(label: "近 30 分钟均值", value: ValueFormat.reading(average, metric: metric, precision: precision)))
+            result.append(Fact(label: "近 30 分钟峰值", value: ValueFormat.reading(peak, metric: metric, precision: precision)))
         }
         return result
     }
@@ -101,8 +100,8 @@ struct Snapshot {
     }
     var note: String {
         switch metric {
-        case .cpu: cpuScale == .total ? "CPU 总量为各逻辑核心使用率之和，单核满载为 100%；用户包含 nice。首次采样需要等待下一次读数。" : "整机比例为各逻辑核心使用率的平均值，上限为 100%；用户包含 nice。首次采样需要等待下一次读数。"
-        case .gpu: "Apple GPU 驱动报告的设备、渲染器和分块器利用率不可相加；驱动分配及使用系统内存属于实验性统计，并非独立显存或 GPU 独占内存。Metal 建议工作集是建议上限，不是实际占用。GPU Neural Accelerator 与独立 Apple Neural Engine 是不同硬件；当前应用未能读取两者的独立实时利用率。ANE 功耗为 IOReport 能量模型按驱动发布时间计算的区间平均值，接口为私有实现，停更或不可用时不显示；功耗不等于利用率。GPU 核心数按驱动核心掩码置位数推算，num_cores 不能直接视为启用核心数；字段和统计窗口没有稳定公开契约。"
+        case .cpu: (cpuScale == .total ? "CPU 总量为各逻辑核心使用率之和，单核满载为 100%；用户包含 nice。" : "整机比例为各逻辑核心使用率的平均值，上限为 100%；用户包含 nice。") + "核心簇来自系统拓扑，核心类型根据拓扑和核心数量推断。首次采样需要等待下一次读数。"
+        case .gpu: "Apple GPU 驱动报告的设备、渲染器和分块器利用率不可相加；驱动分配及使用系统内存属于实验性统计，并非独立显存或 GPU 独占内存。Metal 建议工作集是建议上限，不是实际占用。GPU Neural Accelerator 与独立 Apple Neural Engine 是不同硬件；当前应用未能读取两者的独立利用率。ANE 功耗为 IOReport 能量模型按驱动发布时间计算的区间平均值，接口为私有实现，停更或不可用时不显示；功耗不等于利用率。GPU 核心数按驱动核心掩码置位数推算，num_cores 不能直接视为启用核心数；字段和统计窗口没有稳定公开契约。"
         case .memory: "内存按 1 GB = 1,073,741,824 字节换算，与系统信息一致。主指标为活跃、不可换出和压缩页之和；活跃页可能包含文件缓存，非活跃页未计入；分项曲线另展示非活跃和空闲页，不能将所有曲线相加作为主指标。该值不是应用内存或内存压力，与系统其他工具的已用内存口径不同。统一内存由系统和 GPU 共享。"
         case .disk: "速率是系统识别的块存储设备读写量之和；容量为用户主目录所在卷。系统缓存、外接设备和 APFS 共享空间会影响读数。"
         case .network: "速率为处于运行状态的 en 接口接收或发送字节之和，包含本地网络流量；不统计 VPN、虚拟及其他名称接口，不能视为互联网流量。接口变化时重新建立速率基线。"
