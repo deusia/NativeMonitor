@@ -62,7 +62,10 @@ struct Snapshot {
     var number: String { formatted.0 }
     var unit: String { formatted.1 }
     var reading: String { value == nil ? "—" : "\(number) \(unit)" }
-    var status: String { current?.status ?? "等待真实样本" }
+    var status: String {
+        if metric == .cpu, value != nil, cpuScale == .average { return "整机平均使用率" }
+        return current?.status ?? "等待真实样本"
+    }
     var facts: [Fact] {
         if metric == .cpu, let parts = current?.cpuParts, parts.count == 3 {
             return zip(["用户", "系统", "空闲"], parts).map { Fact(label: $0.0, value: "\(ValueFormat.number($0.1 * cpuFactor, precision: precision)) %") }
@@ -87,7 +90,7 @@ struct Snapshot {
     }
     var note: String {
         switch metric {
-        case .cpu: "CPU 总量为各逻辑核心使用率之和，单核满载为 100%；用户包含 nice。首次采样需要等待下一次读数。"
+        case .cpu: cpuScale == .total ? "CPU 总量为各逻辑核心使用率之和，单核满载为 100%；用户包含 nice。首次采样需要等待下一次读数。" : "整机比例为各逻辑核心使用率的平均值，上限为 100%；用户包含 nice。首次采样需要等待下一次读数。"
         case .gpu: "Apple GPU 驱动报告的设备、渲染器和分块器利用率不可相加；驱动分配及使用系统内存属于实验性统计，并非独立显存或 GPU 独占内存。Metal 建议工作集是建议上限，不是实际占用；驱动字段和统计窗口没有稳定公开契约。"
         case .memory: "主指标为活跃、不可换出和压缩页之和；活跃页可能包含文件缓存，非活跃页未计入。该值不是应用内存或内存压力，与系统其他工具的已用内存口径不同。统一内存由系统和 GPU 共享。"
         case .disk: "速率是系统识别的块存储设备读写量之和；容量为用户主目录所在卷。系统缓存、外接设备和 APFS 共享空间会影响读数。"
@@ -150,6 +153,8 @@ struct Snapshot {
     private var gpuInFlight = false
     private var gpuRequestDate: Date?
     private let collector = MonitorCollector()
+    private(set) var coreLabels: [String]?
+    private var coreLabelsCount = 0
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -213,7 +218,13 @@ struct Snapshot {
     }
     private func record(_ reading: MetricReading, for metric: Metric) {
         now = Date()
-        if metric == .cpu, let previous = readings[metric], previous.cores.count != reading.cores.count { histories[metric] = [] }
+        if metric == .cpu {
+            if let previous = readings[metric], previous.cores.count != reading.cores.count { histories[metric] = [] }
+            if !reading.cores.isEmpty && coreLabelsCount != reading.cores.count {
+                coreLabelsCount = reading.cores.count
+                coreLabels = SystemReader.coreLabels(count: reading.cores.count)
+            }
+        }
         readings[metric] = reading
         if let value = reading.value {
             histories[metric, default: []].removeAll { now.timeIntervalSince($0.date) > 1800 }

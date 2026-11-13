@@ -81,4 +81,12 @@ final class SystemReaderTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(sent, candidate.counters.second)
         XCTAssertLessThanOrEqual(sent, after.counters.second)
     }
+    func testCoreTopologyOnlyMapsUnambiguousGroups() {
+        let types = [0: "M", 1: "M", 2: "P"]
+        let labels = CoreTopology.match(types: types, levels: [("Super", 1), ("Performance", 2)], count: 3)
+        XCTAssertEqual(labels, ["性能核", "性能核", "超能核"])
+        XCTAssertNil(CoreTopology.match(types: [0: "M", 1: "P"], levels: [("Super", 1), ("Performance", 1)], count: 2))
+        XCTAssertNil(CoreTopology.match(types: [1: "M"], levels: [("Super", 1)], count: 1))
+        XCTAssertNil(CoreTopology.match(types: [0: "M", 1: "M", 2: "P", 3: "P"], levels: [("Super", 2), ("Performance", 3)], count: 4))
+    }
 }

@@ -2,7 +2,12 @@ import Foundation
 
 enum ValueFormat {
     static func number(_ value: Double, precision: Int) -> String {
-        value.formatted(.number.precision(.fractionLength(0...max(0, min(2, precision)))))
+        let digits = max(0, min(2, precision))
+        let minimum = pow(10.0, -Double(digits))
+        if value > 0 && value < minimum / 2 {
+            return "<\(minimum.formatted(.number.precision(.fractionLength(0...digits))))"
+        }
+        return value.formatted(.number.precision(.fractionLength(0...digits)))
     }
     static func display(_ value: Double, metric: Metric, precision: Int) -> (String, String) {
         guard metric == .disk || metric == .network else { return (number(value, precision: precision), metric.unit) }

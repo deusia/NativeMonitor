@@ -202,13 +202,24 @@ struct DetailSeriesChart: View {
             if points.isEmpty {
                 Text(snapshot.missingReason ?? "等待分项样本").foregroundStyle(.secondary).frame(height: 80)
             } else {
-                Chart(points) { point in
-                    LineMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment))
-                        .foregroundStyle(by: .value("指标", point.name))
-                        .interpolationMethod(.linear)
+                Chart {
+                    ForEach(points) { point in
+                        let color = colors[point.name] ?? .gray
+                        AreaMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment), stacking: .unstacked)
+                            .interpolationMethod(.monotone)
+                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.18), color.opacity(0.01)], startPoint: .top, endPoint: .bottom))
+                        LineMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment))
+                            .interpolationMethod(.monotone)
+                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                            .foregroundStyle(color)
+                    }
+                    ForEach(names, id: \.self) { name in
+                        if let latest = points.last(where: { $0.name == name }) {
+                            PointMark(x: .value("时间", latest.minute), y: .value(snapshot.metric.unit, latest.value))
+                                .symbolSize(22).foregroundStyle(colors[name] ?? .gray)
+                        }
+                    }
                 }
-                .chartForegroundStyleScale(domain: names, range: names.map { colors[$0] ?? .gray })
-                .chartLegend(position: .bottom, alignment: .leading)
                 .chartXScale(domain: snapshot.plotStart(range)...0)
                 .chartYScale(domain: 0...snapshot.maximum)
                 .chartXAxis(.hidden)
@@ -222,6 +233,13 @@ struct DetailSeriesChart: View {
                 }
                 .frame(height: 180)
                 .accessibilityLabel("\(snapshot.metric.rawValue)分项趋势，包含\(names.joined(separator: "、"))")
+                HStack(spacing: 16) {
+                    ForEach(names, id: \.self) { name in
+                        Label(name, systemImage: "circle.fill")
+                            .labelStyle(.titleAndIcon)
+                            .foregroundStyle(colors[name] ?? .gray)
+                    }
+                }.font(.caption)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -431,8 +449,8 @@ struct Details: View {
                     Trend(snapshot: model.snapshot(model.metric), range: model.range)
                         .frame(height: 180)
                     facts
-                    DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
                     if model.metric == .cpu { cpuCores }
+                    DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
                     Divider()
                     comparison
                     Divider()
@@ -576,14 +594,20 @@ struct Details: View {
         return VStack(alignment: .leading, spacing: 12) {
             Label("逻辑核心", systemImage: "square.grid.3x3.fill").font(.headline)
             if cores.isEmpty { Text("等待核心采样").foregroundStyle(.secondary) }
+            if model.coreLabels != nil {
+                Text("类型根据系统拓扑和核心数量推断，颜色用于区分核心类别。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
                 ForEach(Array(cores.enumerated()), id: \.offset) { index, value in
+                    let kind = model.coreLabels.flatMap { index < $0.count ? $0[index] : nil }
+                    let color: Color = kind == "超能核" ? Color(red: 0.78, green: 0.47, blue: 0.98) : kind == "性能核" ? Color(red: 0.48, green: 0.32, blue: 0.9) : kind == "能效核" ? .teal : metricColor
                     VStack(alignment: .leading, spacing: 6) {
-                        HStack { Text("核心 \(index + 1)"); Spacer(); Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit() }
-                        ProgressView(value: value ?? 0, total: 100).tint(metricColor)
+                        HStack { Text("\(kind ?? "核心") \(index + 1)"); Spacer(); Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit() }
+                        ProgressView(value: value ?? 0, total: 100).tint(color)
                     }.font(.caption).padding(10).modifier(ControlMaterial(reduce: model.reduceTransparency))
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("核心 \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
+                        .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
                 }
             }
         }
