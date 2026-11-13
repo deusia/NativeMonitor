@@ -726,6 +726,7 @@ struct Details: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Apple Neural Engine", systemImage: "brain")
                     Text("独立神经网络引擎")
+                    Text(model.snapshot(.gpu).current?.anePower.map { "平均功耗：\(ValueFormat.number($0, precision: 2)) W" } ?? "平均功耗：暂不可用")
                     Text("实时利用率：暂不可读取").foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, minHeight: 72, alignment: .leading).padding(12)
                     .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))

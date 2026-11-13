@@ -1,10 +1,12 @@
 import Foundation
 
-// 状态只由单个进行中的系统采样任务访问；GPU 采样不访问该状态。
+// 系统采样与 GPU 采样分别串行，且各自只访问所属状态。
 final class MonitorCollector: @unchecked Sendable {
     private var previousCPU: [CPUCounters]?
     private var previousDisk: (TimeInterval, Counters)?
     private var previousNetwork: (TimeInterval, [InterfaceCounters])?
+    private var anePower: ANEPowerReader?
+    private var aneRetryAfter: TimeInterval = 0
     private static func text(_ value: Double?, suffix: String) -> String {
         guard let value, value.isFinite else { return "—" }
         return "\(value.formatted(.number.precision(.fractionLength(0...2)))) \(suffix)"
@@ -61,8 +63,14 @@ final class MonitorCollector: @unchecked Sendable {
         ], rows: [Fact(label: "运行中接口", value: interfaces.map { $0.isEmpty ? "无" : $0.map(\.name).joined(separator: ", ") } ?? "—"), Fact(label: "接口累计接收", value: Self.bytes(received)), Fact(label: "接口累计发送", value: Self.bytes(sent))], series: networkRates.map { ["接收": $0.0 / 1e6, "发送": $0.1 / 1e6] } ?? [:])
         return result
     }
-    static func readGPU() -> MetricReading {
+    func readGPU() -> MetricReading {
         let date = Date()
+        let uptime = ProcessInfo.processInfo.systemUptime
+        if anePower == nil, uptime >= aneRetryAfter {
+            anePower = ANEPowerReader()
+            aneRetryAfter = uptime + 30
+        }
+        let power = anePower?.read()
         switch GPUReader.read() {
         case .success(let gpu):
             var series = ["设备": gpu.utilization]
@@ -73,8 +81,8 @@ final class MonitorCollector: @unchecked Sendable {
             ], rows: [Fact(label: "设备", value: gpu.deviceName ?? "—"), Fact(label: "驱动", value: gpu.driver),
                       Fact(label: "驱动分配系统内存", value: Self.bytes(gpu.allocatedMemory)),
                       Fact(label: "Metal 建议工作集", value: Self.bytes(gpu.recommendedWorkingSet)),
-                      Fact(label: "数据源", value: "IORegistry · PerformanceStatistics"), Fact(label: "最后更新", value: date.formatted(date: .omitted, time: .standard))], series: series)
-        case .failure(let error): return Self.unavailable(date, error.localizedDescription)
+                      Fact(label: "数据源", value: "IORegistry · PerformanceStatistics"), Fact(label: "最后更新", value: date.formatted(date: .omitted, time: .standard))], series: series, anePower: power)
+        case .failure(let error): return MetricReading(date: date, value: nil, status: error.localizedDescription, facts: [], rows: [], anePower: power)
         }
     }
     private static func unavailable(_ date: Date, _ reason: String) -> MetricReading {
