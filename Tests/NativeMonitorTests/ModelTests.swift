@@ -217,4 +217,27 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(gpu.allocatedMemory, 1024)
         XCTAssertNil(gpu.usedMemory)
     }
+    func testGPUCoreCountValidation() {
+        let config: [String: Any] = ["num_cores": 40, "num_mgpus": 4, "core_mask_list": [987, 987, 987, 987]]
+        XCTAssertEqual(GPUCapabilities.coreCount(from: config), 32)
+        XCTAssertEqual(GPUCapabilities.coreCount(from: ["num_cores": 8, "num_mgpus": 1, "core_mask_list": [255]]), 8)
+        XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 40]))
+        XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 40, "num_mgpus": 2, "core_mask_list": [255]]))
+        XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 4, "num_mgpus": 1, "core_mask_list": [255]]))
+        for value: Any in [true, -1, 1.5, Double.nan, "255"] {
+            XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 40, "num_mgpus": 1, "core_mask_list": [value]]))
+        }
+        XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 40, "num_mgpus": 1, "core_mask_list": [0]]))
+    }
+    func testMemoryTrendScalesEachSeriesAndHandlesFlatValues() {
+        let high = MemoryTrendScale.domain([14.8, 15.0])
+        let low = MemoryTrendScale.domain([0.92, 1.03])
+        XCTAssertLessThan(high.lowerBound, 14.8); XCTAssertGreaterThan(high.upperBound, 15.0)
+        XCTAssertLessThan(low.lowerBound, 0.92); XCTAssertGreaterThan(low.upperBound, 1.03)
+        XCTAssertLessThan(low.upperBound - low.lowerBound, 1)
+        let flat = MemoryTrendScale.domain([1, 1])
+        XCTAssertLessThan(flat.lowerBound, 1); XCTAssertGreaterThan(flat.upperBound, 1)
+        XCTAssertEqual(MemoryTrendScale.domain([0, 0]).lowerBound, 0)
+        XCTAssertEqual(MemoryTrendScale.domain([.nan]), 0...0.01)
+    }
 }

@@ -65,7 +65,7 @@ final class MonitorCollector: @unchecked Sendable {
             if let value = gpu.renderer { series["渲染器"] = value }
             if let value = gpu.tiler { series["分块器"] = value }
             return MetricReading(date: date, value: gpu.utilization, status: "设备利用率", facts: [
-                Fact(label: "渲染器", value: Self.text(gpu.renderer, suffix: "%")), Fact(label: "分块器", value: Self.text(gpu.tiler, suffix: "%")), Fact(label: "驱动已用系统内存", value: Self.bytes(gpu.usedMemory))
+                Fact(label: "GPU 核心数", value: GPUReader.capabilities.coreCount.map { "\($0) 核" } ?? "—"), Fact(label: "渲染器", value: Self.text(gpu.renderer, suffix: "%")), Fact(label: "分块器", value: Self.text(gpu.tiler, suffix: "%")), Fact(label: "驱动已用系统内存", value: Self.bytes(gpu.usedMemory))
             ], rows: [Fact(label: "设备", value: gpu.deviceName ?? "—"), Fact(label: "驱动", value: gpu.driver),
                       Fact(label: "驱动分配系统内存", value: Self.bytes(gpu.allocatedMemory)),
                       Fact(label: "Metal 建议工作集", value: Self.bytes(gpu.recommendedWorkingSet)),

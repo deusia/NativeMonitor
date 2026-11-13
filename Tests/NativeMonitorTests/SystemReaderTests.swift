@@ -93,4 +93,39 @@ final class SystemReaderTests: XCTestCase {
         XCTAssertNil(CoreTopology.match(types: [1: "M"], levels: [("Super", 1)], count: 1))
         XCTAssertNil(CoreTopology.match(types: [0: "M", 1: "M", 2: "P", 3: "P"], levels: [("Super", 2), ("Performance", 3)], count: 4))
     }
+    func testClusterGroupingAndMissingCoreSamples() throws {
+        let groups = try XCTUnwrap(CoreTopology.clusters(ids: [0: 2, 1: 1, 2: 1, 3: 2], count: 4))
+        XCTAssertEqual(groups, [CPUCluster(id: 1, indices: [1, 2]), CPUCluster(id: 2, indices: [0, 3])])
+        XCTAssertEqual(groups[0].total([1, 20, 30, 4]), 50)
+        XCTAssertNil(groups[0].total([1, nil, 30, 4]))
+        XCTAssertNil(groups[0].total([1]))
+        XCTAssertNil(CoreTopology.clusters(ids: [0: 0], count: 2))
+        XCTAssertNil(CoreTopology.clusters(ids: [0: -1], count: 1))
+        let local = try XCTUnwrap(SystemReader.cpuCores())
+        if let clusters = SystemReader.coreTopology(count: local.count).clusters {
+            XCTAssertEqual(clusters.flatMap(\.indices).sorted(), Array(local.indices))
+        }
+    }
+    func testGPUCoreCountMatchesSystemProfiler() throws {
+        let capabilities = GPUCapabilities.detect()
+        guard let count = capabilities.coreCount, let name = capabilities.name else {
+            throw XCTSkip("驱动未提供可验证的 GPU 核心掩码")
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
+        process.arguments = ["SPDisplaysDataType", "-json"]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let devices = try XCTUnwrap(document["SPDisplaysDataType"] as? [[String: Any]])
+        guard let device = devices.first(where: { $0["sppci_model"] as? String == name }),
+              let reported = device["sppci_cores"] as? String, let officialCount = Int(reported) else {
+            throw XCTSkip("系统报告未提供可匹配的 GPU 核心数")
+        }
+        XCTAssertEqual(count, officialCount)
+    }
 }

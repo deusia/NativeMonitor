@@ -191,7 +191,7 @@ struct Trend: View {
 struct DetailSeriesChart: View {
     let snapshot: Snapshot
     let range: HistoryRange
-    private let colors: [String: Color] = ["用户": .blue, "系统": .orange, "设备": .blue,
+    static let colors: [String: Color] = ["用户": .blue, "系统": .orange, "设备": .blue,
         "渲染器": .purple, "分块器": .orange, "活跃": .blue, "不可换出": .orange,
         "压缩": .purple, "非活跃": .teal, "空闲": .green, "读取": .blue, "写入": .orange, "接收": .blue, "发送": .orange]
     var body: some View {
@@ -204,7 +204,7 @@ struct DetailSeriesChart: View {
             } else {
                 Chart {
                     ForEach(points) { point in
-                        let color = colors[point.name] ?? .gray
+                        let color = Self.colors[point.name] ?? .gray
                         AreaMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment), stacking: .unstacked)
                             .interpolationMethod(.monotone)
                             .foregroundStyle(LinearGradient(colors: [color.opacity(snapshot.metric == .memory ? 0.10 : 0.18), color.opacity(0.01)], startPoint: .top, endPoint: .bottom))
@@ -216,7 +216,7 @@ struct DetailSeriesChart: View {
                     ForEach(names, id: \.self) { name in
                         if let latest = points.last(where: { $0.name == name }) {
                             PointMark(x: .value("时间", latest.minute), y: .value(snapshot.metric.unit, latest.value))
-                                .symbolSize(22).foregroundStyle(colors[name] ?? .gray)
+                                .symbolSize(22).foregroundStyle(Self.colors[name] ?? .gray)
                         }
                     }
                 }
@@ -237,11 +237,76 @@ struct DetailSeriesChart: View {
                     ForEach(names, id: \.self) { name in
                         Label(name, systemImage: "circle.fill")
                             .labelStyle(.titleAndIcon)
-                            .foregroundStyle(colors[name] ?? .gray)
+                            .foregroundStyle(Self.colors[name] ?? .gray)
                     }
                 }.font(.caption)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+struct MemorySeriesCharts: View {
+    let snapshot: Snapshot
+    let range: HistoryRange
+    let reduce: Bool
+    private let names = ["活跃", "非活跃", "不可换出", "压缩", "空闲"]
+    var body: some View {
+        let points = snapshot.seriesSamples(range)
+        VStack(alignment: .leading, spacing: 12) {
+            Label("内存分项趋势", systemImage: "chart.xyaxis.line").font(.headline)
+            Text("各图纵轴独立缩放，刻度单位为 GB；高度不能直接比较。")
+                .font(.caption).foregroundStyle(.secondary)
+            if points.isEmpty {
+                Text(snapshot.missingReason ?? "等待分项样本").foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], alignment: .leading, spacing: 10) {
+                    ForEach(names, id: \.self) { name in
+                        let samples = points.filter { $0.name == name }
+                        let scale = MemoryTrendScale.domain(samples.map(\.value))
+                        let color = DetailSeriesChart.colors[name] ?? .gray
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(name, systemImage: "circle.fill").foregroundStyle(color)
+                                Spacer()
+                                Text(snapshot.current?.series[name].map { ValueFormat.reading($0, metric: .memory, precision: 2) } ?? "—")
+                                    .monospacedDigit()
+                            }.font(.caption.weight(.medium))
+                            if samples.isEmpty {
+                                Text("暂无样本").font(.caption).foregroundStyle(.secondary).frame(height: 90)
+                            } else {
+                                Chart {
+                                    ForEach(samples) { point in
+                                        AreaMark(x: .value("时间", point.minute), yStart: .value("下限", scale.lowerBound), yEnd: .value("GB", point.value), series: .value("连续区间", point.segment))
+                                            .interpolationMethod(.monotone)
+                                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.24), color.opacity(0.01)], startPoint: .top, endPoint: .bottom))
+                                        LineMark(x: .value("时间", point.minute), y: .value("GB", point.value), series: .value("连续区间", point.segment))
+                                            .interpolationMethod(.monotone)
+                                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)).foregroundStyle(color)
+                                    }
+                                    if let latest = samples.last {
+                                        PointMark(x: .value("时间", latest.minute), y: .value("GB", latest.value)).symbolSize(20).foregroundStyle(color)
+                                    }
+                                }
+                                .chartXScale(domain: snapshot.plotStart(range)...0)
+                                .chartYScale(domain: scale)
+                                .chartXAxis(.hidden)
+                                .chartYAxis {
+                                    AxisMarks(position: .leading, values: [scale.lowerBound, scale.upperBound]) { value in
+                                        AxisGridLine()
+                                        AxisValueLabel {
+                                            if let number = value.as(Double.self) {
+                                                Text(number.formatted(.number.precision(.fractionLength(2))))
+                                            }
+                                        }
+                                    }
+                                }
+                                .frame(height: 90)
+                                .accessibilityLabel("\(name)内存趋势，当前\(snapshot.current?.series[name].map { ValueFormat.reading($0, metric: .memory, precision: 2) } ?? "暂无数据")，刻度\(scale.lowerBound.formatted(.number.precision(.fractionLength(2))))至\(scale.upperBound.formatted(.number.precision(.fractionLength(2)))) GB")
+                            }
+                        }.padding(12).modifier(ControlMaterial(cornerRadius: 16, reduce: reduce))
+                    }
+                }
+            }
+        }
     }
 }
 struct RangePicker: View {
@@ -395,6 +460,7 @@ struct Details: View {
     @State private var glowVisible = false
     @State private var glowGeneration = 0
     @State private var showSettings = false
+    @State private var expandedClusters: Set<Int> = []
     let showOverview: () -> Void
     let close: () -> Void
 
@@ -450,7 +516,12 @@ struct Details: View {
                         .frame(height: 180)
                     facts
                     if model.metric == .cpu { cpuCores }
-                    DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
+                    if model.metric == .gpu { gpuAcceleration }
+                    if model.metric == .memory {
+                        MemorySeriesCharts(snapshot: model.snapshot(.memory), range: model.range, reduce: model.reduceTransparency)
+                    } else {
+                        DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
+                    }
                     Divider()
                     comparison
                     Divider()
@@ -592,24 +663,85 @@ struct Details: View {
     private var cpuCores: some View {
         let cores = model.snapshot(.cpu).current?.cores ?? []
         return VStack(alignment: .leading, spacing: 12) {
-            Label("逻辑核心", systemImage: "square.grid.3x3.fill").font(.headline)
+            Label("CPU 核心簇", systemImage: "square.grid.3x3.fill").font(.headline)
             if cores.isEmpty { Text("等待核心采样").foregroundStyle(.secondary) }
             if model.coreLabels != nil {
-                Text("类型根据系统拓扑和核心数量推断，颜色用于区分核心类别。")
+                Text("簇来自系统拓扑，核心类型根据拓扑和核心数量推断。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
-                ForEach(Array(cores.enumerated()), id: \.offset) { index, value in
-                    let kind = model.coreLabels.flatMap { index < $0.count ? $0[index] : nil }
-                    let color: Color = kind == "超能核" ? Color(red: 0.78, green: 0.47, blue: 0.98) : kind == "性能核" ? Color(red: 0.48, green: 0.32, blue: 0.9) : kind == "能效核" ? .teal : metricColor
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack { Text("\(kind ?? "核心") \(index + 1)"); Spacer(); Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit() }
-                        ProgressView(value: value ?? 0, total: 100).tint(color)
-                    }.font(.caption).padding(10).modifier(ControlMaterial(reduce: model.reduceTransparency))
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
+            if let clusters = model.coreClusters, !cores.isEmpty {
+                ForEach(clusters) { cluster in
+                    let kind = cluster.indices.first.flatMap { index in model.coreLabels.flatMap { index < $0.count ? $0[index] : nil } }
+                    let sameKind = kind != nil && cluster.indices.allSatisfy { model.coreLabels?[$0] == kind }
+                    let total = cluster.total(cores)
+                    DisclosureGroup(isExpanded: Binding(get: { expandedClusters.contains(cluster.id) }, set: { expanded in
+                        if expanded { expandedClusters.insert(cluster.id) } else { expandedClusters.remove(cluster.id) }
+                    })) {
+                        coreGrid(cluster.indices, cores: cores).padding(.top, 12)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Label("\(sameKind ? kind! + " · " : "")簇 \(cluster.id)", systemImage: "square.grid.2x2")
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                Text("\(cluster.indices.count) 核").font(.caption).foregroundStyle(.secondary)
+                            }
+                            HStack {
+                                Text("总量 \(total.map { ValueFormat.number($0, precision: 1) + "%" } ?? "—") / \(cluster.indices.count * 100)%")
+                                Spacer()
+                                Text("平均 \(total.map { ValueFormat.number($0 / Double(cluster.indices.count), precision: 1) + "%" } ?? "—")")
+                            }.font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                        }.padding(.vertical, 4)
+                    }
+                    if cluster.id != clusters.last?.id { Divider() }
                 }
+            } else if !cores.isEmpty {
+                Text("无法读取核心簇拓扑，显示全部逻辑核心。")
+                    .font(.caption).foregroundStyle(.secondary)
+                coreGrid(Array(cores.indices), cores: cores)
             }
+        }
+    }
+    private func coreGrid(_ indices: [Int], cores: [Double?]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
+            ForEach(indices, id: \.self) { index in
+                let value = cores[index]
+                let kind = model.coreLabels.flatMap { index < $0.count ? $0[index] : nil }
+                let color: Color = kind == "超能核" ? Color(red: 0.78, green: 0.47, blue: 0.98) : kind == "性能核" ? Color(red: 0.48, green: 0.32, blue: 0.9) : kind == "能效核" ? .teal : metricColor
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack { Text("\(kind ?? "核心") \(index + 1)"); Spacer(); Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit() }
+                    ProgressView(value: value ?? 0, total: 100).tint(color)
+                }.font(.caption).padding(10).modifier(ControlMaterial(reduce: model.reduceTransparency))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
+            }
+        }
+    }
+    private var gpuAcceleration: some View {
+        let capabilities = GPUReader.capabilities
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("AI 与图形能力", systemImage: "brain.head.profile").font(.headline)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("GPU Neural Accelerator", systemImage: "cpu")
+                    Text(capabilities.supportsNeuralAccelerator == true ? "支持 · 每个 GPU 核心内置" : "未确认硬件支持")
+                    Text("独立利用率：暂不可读取").foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, minHeight: 72, alignment: .leading).padding(12)
+                    .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Apple Neural Engine", systemImage: "brain")
+                    Text("独立神经网络引擎")
+                    Text("实时利用率：暂不可读取").foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, minHeight: 72, alignment: .leading).padding(12)
+                    .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
+            }.font(.caption)
+            HStack {
+                Text("GPU 核心数（驱动掩码）")
+                Spacer()
+                Text(capabilities.coreCount.map { "\($0)" } ?? "—").monospacedDigit()
+                Text("· 光线追踪")
+                Text(capabilities.supportsRayTracing.map { $0 ? "支持" : "不支持" } ?? "未知")
+            }.font(.caption).foregroundStyle(.secondary)
         }
     }
     private var comparison: some View {
