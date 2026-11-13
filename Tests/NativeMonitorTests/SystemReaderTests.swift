@@ -1,0 +1,35 @@
+import XCTest
+@testable import NativeMonitor
+
+final class SystemReaderTests: XCTestCase {
+    func testCounterRatesRejectResetAndInvalidIntervals() throws {
+        let old = Counters(first: 100, second: 200)
+        let current = Counters(first: 300, second: 500)
+        let rates = try XCTUnwrap(current.rates(since: old, seconds: 2))
+        XCTAssertEqual(rates.0, 100)
+        XCTAssertEqual(rates.1, 150)
+        XCTAssertNil(old.rates(since: current, seconds: 2))
+        XCTAssertNil(current.rates(since: old, seconds: 0))
+    }
+    func testCPUPercentages() throws {
+        let old = CPUCounters(user: 10, system: 20, idle: 30, nice: 10)
+        let current = CPUCounters(user: 20, system: 30, idle: 100, nice: 20)
+        let values = try XCTUnwrap(current.percentages(since: old))
+        XCTAssertEqual(values.0, 20, accuracy: 0.001)
+        XCTAssertEqual(values.1, 10, accuracy: 0.001)
+        XCTAssertEqual(values.2, 70, accuracy: 0.001)
+        XCTAssertNil(old.percentages(since: current))
+        XCTAssertNil(old.percentages(since: old))
+    }
+    func testLocalSystemSources() throws {
+        XCTAssertNotNil(SystemReader.cpu())
+        let memory = try XCTUnwrap(SystemReader.memory())
+        XCTAssertGreaterThan(memory.total, 0)
+        XCTAssertLessThanOrEqual(memory.used, memory.total)
+        let volume = try XCTUnwrap(SystemReader.volume())
+        XCTAssertGreaterThan(volume.total, 0)
+        XCTAssertLessThanOrEqual(volume.available, volume.total)
+        XCTAssertNotNil(SystemReader.network())
+        XCTAssertNotNil(SystemReader.disk())
+    }
+}
