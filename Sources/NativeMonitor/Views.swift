@@ -151,11 +151,11 @@ struct Trend: View {
                 }
                 }
                 .chartXScale(domain: snapshot.plotStart(range)...0)
-                .chartYScale(domain: 0...snapshot.maximum)
+                .chartYScale(domain: 0...snapshot.maximum(range))
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     if !mini {
-                        AxisMarks(position: .leading, values: [0, snapshot.maximum / 2, snapshot.maximum]) { value in
+                        AxisMarks(position: .leading, values: [0, snapshot.maximum(range) / 2, snapshot.maximum(range)]) { value in
                             AxisGridLine().foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.22) : Color.secondary.opacity(0.15))
                             AxisValueLabel {
                                 if let number = value.as(Double.self) {
@@ -185,7 +185,7 @@ struct Trend: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: samples)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.rawValue) 分钟，\(snapshot.missingReason ?? snapshot.reading)，\(snapshot.sourceLabel)")
+        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.label)，\(snapshot.missingReason ?? snapshot.reading)，\(snapshot.sourceLabel)")
     }
 }
 struct DetailSeriesChart: View {
@@ -221,10 +221,10 @@ struct DetailSeriesChart: View {
                     }
                 }
                 .chartXScale(domain: snapshot.plotStart(range)...0)
-                .chartYScale(domain: 0...snapshot.maximum)
+                .chartYScale(domain: 0...snapshot.maximum(range))
                 .chartXAxis(.hidden)
                 .chartYAxis {
-                    AxisMarks(position: .leading, values: [0, snapshot.maximum / 2, snapshot.maximum]) { value in
+                    AxisMarks(position: .leading, values: [0, snapshot.maximum(range) / 2, snapshot.maximum(range)]) { value in
                         AxisGridLine()
                         AxisValueLabel {
                             if let number = value.as(Double.self) { Text(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)) }
@@ -311,38 +311,11 @@ struct MemorySeriesCharts: View {
 }
 struct RangePicker: View {
     @ObservedObject var model: MonitorModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var systemReduce
     var body: some View {
-        Group {
-            if #available(macOS 26.0, *), !model.reduceTransparency && !systemReduce {
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 12).fill(.clear)
-                        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
-                        .frame(width: 84, height: 28)
-                        .offset(x: model.range == .short ? 0 : 84)
-                        .allowsHitTesting(false)
-                    HStack(spacing: 0) {
-                        ForEach(HistoryRange.allCases) { range in
-                            Button {
-                                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
-                                    model.range = range
-                                }
-                            } label: {
-                                Text(range.label).frame(maxWidth: .infinity).frame(height: 28)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(model.range == range ? .isSelected : [])
-                        }
-                    }
-                }
-            } else {
-                Picker("历史范围", selection: $model.range) {
-                    ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden()
-            }
-        }.frame(width: 168).accessibilityIdentifier("rangePicker")
+        Picker("历史范围", selection: $model.range) {
+            ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
+        }
+        .labelsHidden().frame(width: 168).accessibilityIdentifier("rangePicker")
     }
 }
 private struct GlassReveal: ViewModifier {
@@ -530,7 +503,7 @@ struct Details: View {
                         Text(model.snapshot(model.metric).note)
                             .font(.callout).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-                        Text("图表仅显示本次启动后的真实样本，最多保留 30 分钟。")
+                        Text("图表仅显示本次启动后的真实样本，最多保留 24 小时。")
                             .font(.caption).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 5)
                     }.font(.caption).foregroundStyle(.primary)
@@ -644,7 +617,7 @@ struct Details: View {
                 VStack(alignment: .trailing, spacing: 5) {
                     Text(snapshot.status).font(.callout)
                     Text(snapshot.sourceLabel).font(.caption).foregroundStyle(.primary)
-                    Text("最多 \(model.range.rawValue) 分钟 · 启动后实测").font(.caption2).foregroundStyle(.primary)
+                    Text("最多 \(model.range.label) · 启动后实测").font(.caption2).foregroundStyle(.primary)
                 }.padding(.bottom, 5)
             }
         }
