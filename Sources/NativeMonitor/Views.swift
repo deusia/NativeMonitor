@@ -311,13 +311,42 @@ struct MemorySeriesCharts: View {
 }
 struct RangePicker: View {
     @ObservedObject var model: MonitorModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var systemReduce
+    private let segmentWidth: CGFloat = 62
     var body: some View {
-        Picker("历史范围", selection: $model.range) {
-            ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
-        }
-        .labelsHidden().frame(width: 168).accessibilityIdentifier("rangePicker")
+        Group {
+            if #available(macOS 26.0, *), !model.reduceTransparency && !systemReduce {
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 12).fill(.clear)
+                        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
+                        .frame(width: segmentWidth, height: 28)
+                        .offset(x: CGFloat(HistoryRange.allCases.firstIndex(of: model.range) ?? 0) * segmentWidth)
+                        .allowsHitTesting(false)
+                    HStack(spacing: 0) {
+                        ForEach(HistoryRange.allCases) { range in
+                            Button {
+                                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
+                                    model.range = range
+                                }
+                            } label: {
+                                Text(range.label).frame(width: segmentWidth, height: 28)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(model.range == range ? .isSelected : [])
+                        }
+                    }
+                }
+            } else {
+                Picker("历史范围", selection: $model.range) {
+                    ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
+                }.pickerStyle(.segmented).labelsHidden()
+            }
+        }.frame(width: segmentWidth * CGFloat(HistoryRange.allCases.count)).accessibilityIdentifier("rangePicker")
     }
 }
+
 private struct GlassReveal: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let presented: Bool
