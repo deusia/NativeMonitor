@@ -132,7 +132,6 @@ struct Snapshot {
     @Published var reduceTransparency = false
     @Published var overviewPresented = false
     @Published var detailsPresented = false
-    @Published var experimentalBlur = true
     let backdropDiagnostics = BackdropDiagnostics()
     @Published private(set) var gpuReading: GPUReading?
     @Published private(set) var gpuHistory: [GPUReading] = []

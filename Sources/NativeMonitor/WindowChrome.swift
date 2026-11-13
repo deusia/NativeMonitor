@@ -34,8 +34,6 @@ struct ResizeEdges: OptionSet {
 final class WindowChrome: NSView {
     private var area: NSTrackingArea?
     private var edges: ResizeEdges = []
-    private var buttons: [NSButton] { [.closeButton, .miniaturizeButton, .zoomButton].compactMap { window?.standardWindowButton($0) } }
-    private var controlsVisible = true
     override var acceptsFirstResponder: Bool { false }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -52,20 +50,11 @@ final class WindowChrome: NSView {
     override func mouseMoved(with event: NSEvent) { updateHover() }
     override func mouseExited(with event: NSEvent) {
         edges = []; needsDisplay = true
-        showControls(false)
         NSCursor.arrow.set()
-    }
-    private func showControls(_ visible: Bool) {
-        guard visible != controlsVisible else { return }
-        controlsVisible = visible
-        for button in buttons { button.alphaValue = visible ? 1 : 0 }
     }
     private func updateHover() {
         guard let window else { return }
         let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        var zone = NSRect.null
-        for button in buttons { zone = zone.union(convert(button.bounds, from: button)) }
-        showControls(!zone.isNull && zone.insetBy(dx: -14, dy: -12).contains(point))
         let wasResizing = !edges.isEmpty
         edges = ResizeEdges.at(point, in: bounds)
         if wasResizing && edges.isEmpty { NSCursor.arrow.set() }

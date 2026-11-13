@@ -12,7 +12,7 @@ static CGImageRef Mask(size_t w, size_t h) {
     for(size_t y=0;y<h;y++) for(size_t x=0;x<w;x++) {
         double qx=fabs(x+.5-w/2.)-w/2.+64, qy=fabs(y+.5-h/2.)-h/2.+64;
         double d=hypot(fmax(qx,0),fmax(qy,0))+fmin(fmax(qx,qy),0)-64;
-        double t=fmin(1,fmax(0,-d/fmin(120, fmin(w,h)/3.)));
+        double t=fmin(1,fmax(0,-d/fmin(160, fmin(w,h)/3.)));
         uint8_t a=round(255*t*t*(3-2*t));
         size_t k=(y*w+x)*4; p[k]=a;p[k+1]=a;p[k+2]=a;p[k+3]=a;
     }
@@ -31,6 +31,8 @@ static CGImageRef Mask(size_t w, size_t h) {
 @property(weak) NSWindow *configuredWindow;
 @property id oldFlatten;
 @property id oldHosting;
+@property BOOL presentationInitialized;
+@property BOOL presented;
 @end
 @implementation NMPrivateBackdropView
 -(instancetype)initWithFrame:(NSRect)frame {
@@ -43,7 +45,7 @@ static CGImageRef Mask(size_t w, size_t h) {
         self.backdrop=[cls layer];
         self.blur=((id(*)(id,SEL,id))objc_msgSend)(filter,selector,@"variableBlur");
         if(!self.blur) return self;
-        BOOL ok=Put(self.blur,@"inputRadius",@6) && Put(self.blur,@"inputNormalizeEdges",@YES)
+        BOOL ok=Put(self.blur,@"inputRadius",@3) && Put(self.blur,@"inputNormalizeEdges",@YES)
             && Put(self.backdrop,@"windowServerAware",@YES)
             && Put(self.backdrop,@"allowsInPlaceFiltering",@NO);
         if(!ok) {self.backdrop=nil;return self;}
@@ -53,12 +55,48 @@ static CGImageRef Mask(size_t w, size_t h) {
         [self.layer addSublayer:self.backdrop];
         // 暗化与模糊共用渐变轮廓，外围透明，避免独立灰色矩形边界。
         self.dimming=[CALayer layer];
-        self.dimming.backgroundColor=[NSColor colorWithWhite:0 alpha:0.10].CGColor;
+        [self updateDimming];
         self.dimming.mask=[CALayer layer];
         self.dimming.hidden=YES;
         [self.layer addSublayer:self.dimming];
         self.effectStatus=@"私有渐变模糊 · 无录屏 · 系统升级可能失效";
     }return self;
+}
+-(void)setPresented:(BOOL)presented animated:(BOOL)animated {
+    if(self.presentationInitialized && self.presented==presented) {
+        if(!animated) {
+            [self.backdrop removeAnimationForKey:@"presentationOpacity"];
+            [self.dimming removeAnimationForKey:@"presentationOpacity"];
+        }
+        return;
+    }
+    BOOL shouldAnimate=animated && self.presentationInitialized;
+    self.presentationInitialized=YES;
+    self.presented=presented;
+    for(CALayer *layer in self.backdrop && self.dimming ? @[self.backdrop, self.dimming] : @[]) {
+        float from=layer.presentationLayer ? layer.presentationLayer.opacity : layer.opacity;
+        [layer removeAnimationForKey:@"presentationOpacity"];
+        [CATransaction begin];[CATransaction setDisableActions:YES];
+        layer.opacity=presented ? 1 : 0;
+        [CATransaction commit];
+        if(shouldAnimate) {
+            CABasicAnimation *animation=[CABasicAnimation animationWithKeyPath:@"opacity"];
+            animation.fromValue=@(from);animation.toValue=@(layer.opacity);
+            animation.duration=0.36;
+            animation.timingFunction=[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+            [layer addAnimation:animation forKey:@"presentationOpacity"];
+        }
+    }
+}
+-(void)updateDimming {
+    BOOL dark=[[self.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] isEqualToString:NSAppearanceNameDarkAqua];
+    [CATransaction begin];[CATransaction setDisableActions:YES];
+    self.dimming.backgroundColor=[NSColor colorWithWhite:0 alpha:dark ? 0.30 : 0.10].CGColor;
+    [CATransaction commit];
+}
+-(void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self updateDimming];
 }
 -(NSView *)hitTest:(NSPoint)point {return nil;}
 -(void)viewWillMoveToWindow:(NSWindow *)window {

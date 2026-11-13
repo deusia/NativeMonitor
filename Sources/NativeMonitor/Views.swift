@@ -2,42 +2,8 @@ import SwiftUI
 import Charts
 import PrivateBackdrop
 
-struct WindowMaterial: NSViewRepresentable {
-    let reduce: Bool
-    var material: NSVisualEffectView.Material = .underWindowBackground
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        let mask = Self.edgeMask()
-        mask.size = NSSize(width: 193, height: 193)
-        mask.capInsets = NSEdgeInsets(top: 96, left: 96, bottom: 96, right: 96)
-        view.maskImage = mask
-        return view
-    }
-    static func edgeMask() -> NSImage {
-        let image = NSImage(size: NSSize(width: 65, height: 65), flipped: false) { rect in
-            NSGraphicsContext.current?.compositingOperation = .copy
-            for inset in 0...24 {
-                let t = CGFloat(inset) / 24
-                NSColor.white.withAlphaComponent(t * t * (3 - 2 * t)).setFill()
-                NSBezierPath(roundedRect: rect.insetBy(dx: CGFloat(inset), dy: CGFloat(inset)),
-                             xRadius: 32 - CGFloat(inset), yRadius: 32 - CGFloat(inset)).fill()
-            }
-            return true
-        }
-        image.capInsets = NSEdgeInsets(top: 32, left: 32, bottom: 32, right: 32)
-        image.resizingMode = .stretch
-        return image
-    }
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.material = material
-        // 统一承托底板采样窗口后方；前景模块不重复叠加 HUD 模糊。
-        view.alphaValue = 1
-        view.blendingMode = .behindWindow
-        view.state = .active
-        view.isEmphasized = false
-        view.isHidden = reduce
-    }
-}
+private let darkMetricColor = Color(red: 0.35, green: 0.75, blue: 1)
+
 struct GlassButton: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     let reduce: Bool
@@ -49,25 +15,21 @@ struct GlassButton: ViewModifier {
         if #available(macOS 26.0, *), !reduce && !systemReduce {
             if card || translucent {
                 content.buttonStyle(.plain).background {
-                    RoundedRectangle(cornerRadius: 22).fill(colorScheme == .dark ? Color.black.opacity(0.72) : .clear)
-                        .glassEffect((colorScheme == .dark ? Glass.regular : Glass.clear).interactive(), in: RoundedRectangle(cornerRadius: 22))
-                        .opacity(colorScheme == .dark ? 1 : translucent ? 0.65 : 1)
+                    RoundedRectangle(cornerRadius: 22).fill(.clear)
+                        .glassEffect(Glass.clear.tint(colorScheme == .dark ? .black.opacity(0.18) : nil).interactive(), in: RoundedRectangle(cornerRadius: 22))
+                        .opacity(translucent ? 0.65 : 1)
                         .allowsHitTesting(false)
                 }
             } else {
                 content.buttonStyle(.glass).buttonBorderShape(circular ? .circle : .capsule)
-                    .background {
-                        if colorScheme == .dark {
-                            if circular { Circle().fill(Color.black.opacity(0.72)) }
-                            else { Capsule().fill(Color.black.opacity(0.72)) }
-                        }
-                    }
             }
         } else { content.buttonStyle(.bordered) }
     }
 }
 
 struct PrivateRegionBackdrop: NSViewRepresentable {
+    let presented: Bool
+    let reduceMotion: Bool
     let diagnostics: BackdropDiagnostics?
     final class Coordinator {
         let id = UUID()
@@ -82,6 +44,7 @@ struct PrivateRegionBackdrop: NSViewRepresentable {
     }
     func makeNSView(context: Context) -> NMPrivateBackdropView { NMPrivateBackdropView(frame: .zero) }
     func updateNSView(_ view: NMPrivateBackdropView, context: Context) {
+        view.setPresented(presented, animated: !reduceMotion)
         let coordinator = context.coordinator
         let id = coordinator.id
         DispatchQueue.main.async { [weak view] in
@@ -102,9 +65,9 @@ struct ControlMaterial: ViewModifier {
             content.background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: cornerRadius))
         } else if #available(macOS 26.0, *) {
             content.background {
-                RoundedRectangle(cornerRadius: cornerRadius).fill(colorScheme == .dark ? Color.black.opacity(0.72) : .clear)
-                    .glassEffect(colorScheme == .dark ? .regular : .clear, in: RoundedRectangle(cornerRadius: cornerRadius))
-                    .opacity(colorScheme == .dark ? 1 : materialOpacity)
+                RoundedRectangle(cornerRadius: cornerRadius).fill(.clear)
+                    .glassEffect(Glass.clear.tint(colorScheme == .dark ? .black.opacity(0.18) : nil), in: RoundedRectangle(cornerRadius: cornerRadius))
+                    .opacity(materialOpacity)
             }
         } else {
             content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
@@ -112,37 +75,62 @@ struct ControlMaterial: ViewModifier {
     }
 }
 struct DemoControls: View {
+    @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @ObservedObject var model: MonitorModel
-    var compact = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Picker("场景", selection: $model.scenario) {
-                    ForEach(Scenario.allCases) { Text($0.rawValue).tag($0) }
-                }.accessibilityIdentifier("scenarioPicker")
-                if !compact { themePicker }
+                Text("场景")
+                Spacer()
+                Menu {
+                    ForEach(Scenario.allCases) { scenario in
+                        Button { model.scenario = scenario } label: {
+                            if model.scenario == scenario { Label(scenario.rawValue, systemImage: "checkmark") }
+                            else { Text(scenario.rawValue) }
+                        }
+                    }
+                } label: {
+                    HStack { Text(model.scenario.rawValue); Spacer(minLength: 8); Image(systemName: "chevron.down") }
+                        .padding(.horizontal, 12).frame(width: 170, height: 30)
+                        .contentShape(Rectangle())
+                        .modifier(ControlMaterial(cornerRadius: 15, reduce: model.reduceTransparency))
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+                .accessibilityLabel("场景").accessibilityValue(model.scenario.rawValue)
+                .accessibilityIdentifier("scenarioPicker")
             }
             HStack {
-                if compact { themePicker }
-                Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.checkbox)
-                Spacer(minLength: 0)
+                Text("外观")
+                Spacer()
+                Menu {
+                    ForEach(Theme.allCases) { theme in
+                        Button { model.theme = theme } label: {
+                            if model.theme == theme { Label(theme.rawValue, systemImage: "checkmark") }
+                            else { Text(theme.rawValue) }
+                        }
+                    }
+                } label: {
+                    HStack { Text(model.theme.rawValue); Spacer(minLength: 8); Image(systemName: "chevron.down") }
+                        .padding(.horizontal, 12).frame(width: 170, height: 30)
+                        .contentShape(Rectangle())
+                        .modifier(ControlMaterial(cornerRadius: 15, reduce: model.reduceTransparency))
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+                .accessibilityLabel("外观").accessibilityValue(model.theme.rawValue)
+                .accessibilityIdentifier("themePicker")
             }
-            Toggle("实验性区域模糊（私有 API）", isOn: $model.experimentalBlur).toggleStyle(.checkbox)
-            if model.experimentalBlur {
+            Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
+            if !model.reduceTransparency && !systemReduce {
                 BackdropStatus(diagnostics: model.backdropDiagnostics)
             }
-        }.font(.system(size: 12)).padding(10)
-            .modifier(ControlMaterial(reduce: model.reduceTransparency))
-    }
-    var themePicker: some View {
-        Picker("外观", selection: $model.theme) { ForEach(Theme.allCases) { Text($0.rawValue).tag($0) } }
-            .accessibilityIdentifier("themePicker")
+        }.font(.system(size: 12)).padding(14)
+            .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
     }
 }
 struct Trend: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
-    private var chartColor: Color { colorScheme == .dark ? Color(red: 0.35, green: 0.75, blue: 1) : .blue }
+    private var chartColor: Color { colorScheme == .dark ? darkMetricColor : .blue }
     let snapshot: Snapshot
     let range: HistoryRange
     var mini = false
@@ -211,10 +199,51 @@ struct Trend: View {
 }
 struct RangePicker: View {
     @ObservedObject var model: MonitorModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var systemReduce
     var body: some View {
-        Picker("历史范围", selection: $model.range) {
-            ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
-        }.pickerStyle(.segmented).labelsHidden().frame(width: 168).accessibilityIdentifier("rangePicker")
+        Group {
+            if #available(macOS 26.0, *), !model.reduceTransparency && !systemReduce {
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 12).fill(.clear)
+                        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
+                        .frame(width: 84, height: 28)
+                        .offset(x: model.range == .short ? 0 : 84)
+                        .allowsHitTesting(false)
+                    HStack(spacing: 0) {
+                        ForEach(HistoryRange.allCases) { range in
+                            Button {
+                                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
+                                    model.range = range
+                                }
+                            } label: {
+                                Text(range.label).frame(maxWidth: .infinity).frame(height: 28)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(model.range == range ? .isSelected : [])
+                        }
+                    }
+                }
+            } else {
+                Picker("历史范围", selection: $model.range) {
+                    ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
+                }.pickerStyle(.segmented).labelsHidden()
+            }
+        }.frame(width: 168).accessibilityIdentifier("rangePicker")
+    }
+}
+private struct GlassReveal: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let presented: Bool
+    let delay: Double
+    func body(content: Content) -> some View {
+        content
+            .opacity(presented ? 1 : 0)
+            .scaleEffect(reduceMotion || presented ? 1 : 0.96)
+            .offset(y: reduceMotion || presented ? 0 : 8)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.26).delay(delay), value: presented)
+            .allowsHitTesting(presented)
     }
 }
 struct Overview: View {
@@ -237,14 +266,16 @@ struct Overview: View {
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
                     .accessibilityLabel("概览演示设置")
                     .popover(isPresented: $showSettings) {
-                        DemoControls(model: model, compact: true).padding(14).frame(width: 350)
+                        DemoControls(model: model).padding(14).frame(width: 350)
                     }
                 Button(action: close) { Image(systemName: "xmark") }
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
                     .accessibilityLabel("关闭概览")
-            }.padding(10).modifier(ControlMaterial(reduce: model.reduceTransparency))
+            }.padding(10).modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
+                .modifier(GlassReveal(presented: model.overviewPresented, delay: 0))
             HStack { Text("资源状态").font(.caption); Spacer(); RangePicker(model: model) }
-                .padding(8).modifier(ControlMaterial(reduce: model.reduceTransparency))
+                .padding(8).modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
+                .modifier(GlassReveal(presented: model.overviewPresented, delay: 0.025))
             Grid(horizontalSpacing: 12, verticalSpacing: 12) {
                 GridRow { metricCard(.cpu); metricCard(.gpu) }
                 GridRow { metricCard(.memory); metricCard(.disk) }
@@ -255,11 +286,9 @@ struct Overview: View {
                 Spacer()
                 Button("打开详情窗口") { open(model.metric) }
                     .modifier(GlassButton(reduce: model.reduceTransparency)).keyboardShortcut("1", modifiers: .command)
-            }
-        }.padding(16).frame(width: 440)
-            .opacity(model.overviewPresented ? 1 : 0)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.overviewPresented)
-            .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, experimental: model.experimentalBlur, diagnostics: model.backdropDiagnostics))
+            }.modifier(GlassReveal(presented: model.overviewPresented, delay: 0.14))
+        }.padding([.horizontal, .bottom], 16).padding(.top, 4).frame(width: 440)
+            .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.overviewPresented, topPadding: 16, diagnostics: model.backdropDiagnostics))
             .onExitCommand(perform: close)
     }
     private func metricCard(_ metric: Metric) -> some View {
@@ -283,6 +312,7 @@ struct Overview: View {
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(RoundedRectangle(cornerRadius: 22))
         }.modifier(GlassButton(reduce: model.reduceTransparency, card: true))
+            .modifier(GlassReveal(presented: model.overviewPresented, delay: 0.04 + Double(Metric.allCases.firstIndex(of: metric) ?? 0) * 0.02))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("查看\(metric.rawValue)详情，\(snapshot.reading)，\(snapshot.sourceLabel)")
             .accessibilityIdentifier("overview-\(metric.id)")
@@ -290,25 +320,29 @@ struct Overview: View {
     }
 }
 struct WindowGlass: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let reduce: Bool
-    var experimental = false
+    var presented = true
+    var topPadding: CGFloat = 32
     var diagnostics: BackdropDiagnostics? = nil
     func body(content: Content) -> some View {
         // 整窗只做背景模糊，避免大块玻璃透镜产生矩形明暗边界。
-        content.padding(32)
+        content.padding([.horizontal, .bottom], 32).padding(.top, topPadding)
             .background {
                 if reduce {
                     Color(nsColor: .windowBackgroundColor)
-                } else if experimental {
-                    PrivateRegionBackdrop(diagnostics: diagnostics).allowsHitTesting(false)
+                } else {
+                    PrivateRegionBackdrop(presented: presented, reduceMotion: reduceMotion, diagnostics: diagnostics).allowsHitTesting(false)
                 }
             }
     }
 }
 struct Details: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: MonitorModel
+    private var metricColor: Color { colorScheme == .dark ? darkMetricColor : .accentColor }
     @State private var columns: NavigationSplitViewVisibility = .all
     @State private var glowMetric: Metric?
     @State private var glowVisible = false
@@ -325,6 +359,7 @@ struct Details: View {
                     Text("本机资源").font(.caption.weight(.medium)).foregroundStyle(.primary)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .modifier(ControlMaterial(reduce: model.reduceTransparency))
+                        .modifier(GlassReveal(presented: model.detailsPresented, delay: 0))
                     ForEach(Array(Metric.allCases.enumerated()), id: \.element.id) { index, metric in
                         Button { selectMetric(metric) } label: {
                             HStack {
@@ -335,12 +370,13 @@ struct Details: View {
                                 .font(.system(size: 14, weight: model.metric == metric ? .semibold : .regular))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 12).padding(.vertical, 10)
-                                .foregroundStyle(model.metric == metric ? Color.accentColor : Color.primary)
+                                .contentShape(Rectangle())
+                                .foregroundStyle(model.metric == metric ? metricColor : Color.primary)
                         }.modifier(GlassButton(reduce: model.reduceTransparency, translucent: true))
+                            .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.025 + Double(index) * 0.02))
                             .overlay {
                                 if glowMetric == metric, !reduceMotion {
-                                    Capsule().stroke(Color.accentColor.opacity(glowVisible ? 0.5 : 0), lineWidth: 2)
-                                        .blur(radius: glowVisible ? 2 : 6)
+                                    Capsule().stroke(metricColor.opacity(glowVisible ? 0.5 : 0), lineWidth: 2)
                                         .scaleEffect(glowVisible ? 1 : 1.10)
                                         .allowsHitTesting(false).accessibilityHidden(true)
                                 }
@@ -355,7 +391,8 @@ struct Details: View {
                 }.padding(.horizontal, 10).padding(.top, 14)
                 Text("GPU 实验性实时\n其他指标为模拟数据")
                     .font(.system(size: 11)).foregroundStyle(.primary)
-                    .padding(12).modifier(ControlMaterial(reduce: model.reduceTransparency)).padding(10)
+                    .padding(12).modifier(ControlMaterial(reduce: model.reduceTransparency))
+                    .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.14)).padding(10)
             }
             .frame(width: 190).frame(maxHeight: .infinity)
             }
@@ -382,7 +419,9 @@ struct Details: View {
             // A different metric is a new detail page. Reset only its scroll subtree;
             // live sample updates, range, theme and sidebar state retain identity.
             .id(model.metric)
+            .transition(reduceMotion ? .identity : .opacity.combined(with: .offset(y: 6)))
             .modifier(ControlMaterial(cornerRadius: 24, materialOpacity: 0.65, reduce: model.reduceTransparency))
+            .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.04))
             .navigationTitle("性能监控")
             .toolbar {
                 ToolbarItem(placement: .navigation) {
@@ -390,27 +429,25 @@ struct Details: View {
                         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
                             columns = columns == .detailOnly ? .all : .detailOnly
                         }
-                    } label: { Image(systemName: "sidebar.left") }
-                    .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
+                    } label: {
+                        Image(systemName: "sidebar.left").font(.system(size: 16)).frame(width: 36, height: 36)
+                            .background(Circle().strokeBorder(Color.primary.opacity(0.15)))
+                            .padding(4)
+                            .contentShape(Circle())
+                            .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
+                    }
+                    .controlSize(.large)
+                    .buttonStyle(.plain)
                     .help(columns == .detailOnly ? "展开侧栏" : "收起侧栏")
                     .accessibilityLabel(columns == .detailOnly ? "展开侧栏" : "收起侧栏")
                     .accessibilityIdentifier("sidebarToggle")
                     .keyboardShortcut("s", modifiers: [.command, .control])
                 }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button(action: showOverview) { Label("概览", systemImage: "menubar.rectangle") }
-                        .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
-                        .help("显示紧凑概览").accessibilityLabel("显示概览")
-                    Button { showSettings.toggle() } label: { Label("演示设置", systemImage: "slider.horizontal.3") }
-                        .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
-                        .help("演示场景与外观").accessibilityLabel("演示设置")
-                        .popover(isPresented: $showSettings) {
-                            VStack(alignment: .leading, spacing: 12) {
-                                HStack { Text("演示设置").font(.headline); Spacer(); Button("完成") { showSettings = false }.modifier(GlassButton(reduce: model.reduceTransparency)) }
-                                DemoControls(model: model, compact: true)
-                                Text("只改变原型，不修改系统设置。").font(.caption).foregroundStyle(.primary)
-                            }.padding(18).frame(width: 350)
-                        }
+                if #available(macOS 26.0, *) {
+                    ToolbarItem(placement: .primaryAction) { toolbarActions }
+                        .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .primaryAction) { toolbarActions }
                 }
             }
         }
@@ -418,14 +455,41 @@ struct Details: View {
         .toolbarBackground(.hidden, for: .windowToolbar)
         .padding(10)
         .frame(minWidth: 640, minHeight: 520)
-        .opacity(model.detailsPresented ? 1 : 0)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.detailsPresented)
-        .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, experimental: model.experimentalBlur, diagnostics: model.backdropDiagnostics))
+        .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, diagnostics: model.backdropDiagnostics))
         .onExitCommand(perform: close)
     }
 
+    private var toolbarActions: some View {
+        HStack(spacing: 4) {
+            Button(action: showOverview) {
+                Image(systemName: "menubar.rectangle").font(.system(size: 16)).frame(width: 36, height: 36)
+                    .background(Circle().strokeBorder(Color.primary.opacity(0.15)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("显示紧凑概览").accessibilityLabel("显示概览")
+            Button { showSettings.toggle() } label: {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 16)).frame(width: 36, height: 36)
+                    .background(Circle().strokeBorder(Color.primary.opacity(0.15)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("演示场景与外观").accessibilityLabel("演示设置")
+            .popover(isPresented: $showSettings) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack { Text("演示设置").font(.headline); Spacer(); Button("完成") { showSettings = false }.modifier(GlassButton(reduce: model.reduceTransparency)) }
+                    DemoControls(model: model)
+                    Text("只改变原型，不修改系统设置。").font(.caption).foregroundStyle(.primary)
+                }.padding(18).frame(width: 350)
+            }
+        }
+        .padding(4)
+        .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
+    }
+
     private func selectMetric(_ metric: Metric) {
-        model.metric = metric
+        guard model.metric != metric else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { model.metric = metric }
         guard !reduceMotion else { return }
         glowGeneration += 1
         let generation = glowGeneration
@@ -478,7 +542,7 @@ struct Details: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8)], spacing: 8) {
                 ForEach(Metric.allCases) { metric in
                     let snapshot = model.snapshot(metric)
-                    Button { model.metric = metric } label: {
+                    Button { selectMetric(metric) } label: {
                         VStack(alignment: .leading, spacing: 9) {
                             Text(metric == .gpu ? "GPU · 实时" : "\(metric.rawValue) · 模拟").font(.caption).foregroundStyle(.primary)
                             Text(snapshot.reading).font(.system(size: 14, weight: .medium)).monospacedDigit()
@@ -486,7 +550,7 @@ struct Details: View {
                                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)
                             Trend(snapshot: snapshot, range: model.range, mini: true).frame(height: 25)
                         }.padding(11).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(model.metric == metric ? Color.accentColor.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 12))
+                            .background(model.metric == metric ? metricColor.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain).accessibilityLabel("对照\(metric.rawValue)，\(snapshot.reading)")
                         .accessibilityAddTraits(model.metric == metric ? .isSelected : [])
                 }

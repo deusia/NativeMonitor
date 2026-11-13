@@ -35,6 +35,7 @@ final class OverviewPanel: NSPanel {
     var overviewPanel: OverviewPanel!
     var outsideClickMonitor: Any?
     var localClickMonitor: Any?
+    var statusMoveObserver: NSObjectProtocol?
     var detailWindow: NSWindow?
     var subscriptions = Set<AnyCancellable>()
     var transitionIDs: [ObjectIdentifier: UUID] = [:]
@@ -63,6 +64,14 @@ final class OverviewPanel: NSPanel {
             if let self, self.overviewPanel.isVisible, event.window === self.detailWindow { self.hideOverview() }
             return event
         }
+        if let statusWindow = status.button?.window {
+            statusMoveObserver = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: statusWindow, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.overviewPanel.isVisible, !self.closingWindows.contains(ObjectIdentifier(self.overviewPanel)) else { return }
+                    self.showOverview()
+                }
+            }
+        }
         model.$scenario.sink { [weak self] scenario in self?.updateStatus(scenario) }.store(in: &subscriptions)
         model.$theme.sink { [weak self] theme in
             let appearance = theme == .system ? nil : NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
@@ -78,6 +87,7 @@ final class OverviewPanel: NSPanel {
         model.stopGPU()
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
         if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
+        if let statusMoveObserver { NotificationCenter.default.removeObserver(statusMoveObserver) }
     }
     func present(_ window: NSWindow, frame: NSRect? = nil) {
         let key = ObjectIdentifier(window)
@@ -93,7 +103,7 @@ final class OverviewPanel: NSPanel {
             guard let self, self.transitionIDs[key] == token else { return }
             self.setContentPresented(true, for: window)
         }
-        if model.experimentalBlur {
+        if !model.reduceTransparency && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
             // 避免整窗 alpha/缩放动画把背景合成临时扁平化成灰色底板。
             window.animationBehavior = .none
             window.alphaValue = 1
@@ -131,8 +141,8 @@ final class OverviewPanel: NSPanel {
         closingWindows.insert(key)
         window.ignoresMouseEvents = true
         setContentPresented(false, for: window)
-        if model.experimentalBlur {
-            DispatchQueue.main.asyncAfter(deadline: .now() + (reduce ? 0 : 0.18)) { [weak self] in
+        if !model.reduceTransparency && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (reduce ? 0 : 0.42)) { [weak self] in
                 guard let self, self.transitionIDs[key] == token else { return }
                 window.orderOut(nil)
                 window.setFrame(target, display: false)
@@ -144,7 +154,7 @@ final class OverviewPanel: NSPanel {
             return
         }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = reduce ? 0 : 0.13
+            context.duration = reduce ? 0 : 0.42
             window.animator().alphaValue = 0
             if !reduce { window.animator().setFrame(target.insetBy(dx: target.width * 0.006, dy: target.height * 0.006), display: true) }
         } completionHandler: { [weak self] in
@@ -180,15 +190,26 @@ final class OverviewPanel: NSPanel {
         let size = content.fittingSize
         let anchor = statusWindow.convertToScreen(button.convert(button.bounds, to: nil))
         let visible = screen.visibleFrame
-        let origin = NSPoint(x: min(max(anchor.midX - size.width / 2, visible.minX + 8), visible.maxX - size.width - 8),
-                             y: max(visible.minY + 8, anchor.minY - size.height - 6))
+        let anchorReady = screen.frame.contains(NSPoint(x: anchor.midX, y: anchor.midY)) && anchor.midY >= visible.maxY
+        let origin = NSPoint(x: anchorReady ? min(max(anchor.midX - size.width / 2, visible.minX + 8), visible.maxX - size.width - 8) : visible.maxX - size.width - 8,
+                             y: max(visible.minY + 8, (anchorReady ? anchor.minY : visible.maxY) - size.height - 6))
         present(overviewPanel, frame: NSRect(origin: origin, size: size))
         if outsideClickMonitor == nil {
             outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-                guard let self, !self.overviewPanel.frame.contains(NSEvent.mouseLocation) else { return }
+                guard let self else { return }
+                let statusFrame: NSRect?
+                if let button = self.status.button, let window = button.window {
+                    statusFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
+                } else {
+                    statusFrame = nil
+                }
+                guard Self.shouldDismissOverview(at: NSEvent.mouseLocation, panel: self.overviewPanel.frame, status: statusFrame) else { return }
                 self.hideOverview()
             }
         }
+    }
+    static func shouldDismissOverview(at point: NSPoint, panel: NSRect, status: NSRect?) -> Bool {
+        !panel.contains(point) && !(status?.contains(point) ?? false)
     }
     @objc func openDetails() { showDetails(model.metric) }
     func showDetails(_ metric: Metric) {

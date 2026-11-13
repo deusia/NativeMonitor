@@ -2,7 +2,6 @@ import XCTest
 import AppKit
 import PrivateBackdrop
 import SwiftUI
-import CoreImage.CIFilterBuiltins
 @testable import NativeMonitor
 final class ModelTests: XCTestCase {
     func testChartSampleIdentitySurvivesHistoryPruning() throws {
@@ -48,8 +47,13 @@ final class ModelTests: XCTestCase {
 
     @MainActor func testBackdropDimmingFadesToTransparentAtPerimeter() throws {
         let view = NMPrivateBackdropView(frame: NSRect(x: 0, y: 0, width: 320, height: 400))
+        view.appearance = NSAppearance(named: .aqua)
         view.layout()
         let dimming = try XCTUnwrap(view.layer?.sublayers?.last)
+        XCTAssertEqual(try XCTUnwrap(dimming.backgroundColor).alpha, 0.10, accuracy: 0.001)
+        view.appearance = NSAppearance(named: .darkAqua)
+        XCTAssertEqual(try XCTUnwrap(dimming.backgroundColor).alpha, 0.30, accuracy: 0.001)
+        view.appearance = NSAppearance(named: .aqua)
         XCTAssertEqual(try XCTUnwrap(dimming.backgroundColor).alpha, 0.10, accuracy: 0.001)
         XCTAssertFalse(dimming.isHidden)
         let contents = try XCTUnwrap(dimming.mask?.contents)
@@ -59,13 +63,37 @@ final class ModelTests: XCTestCase {
         let corner = try XCTUnwrap(bitmap.colorAt(x: 0, y: 0)).alphaComponent
         let edge = try XCTUnwrap(bitmap.colorAt(x: 1, y: 200)).alphaComponent
         let transition = try XCTUnwrap(bitmap.colorAt(x: 40, y: 200)).alphaComponent
+        let innerEdge = try XCTUnwrap(bitmap.colorAt(x: 90, y: 200)).alphaComponent
         let center = try XCTUnwrap(bitmap.colorAt(x: 160, y: 200)).alphaComponent
         XCTAssertEqual(corner, 0, accuracy: 0.001)
         XCTAssertLessThan(edge, transition)
         XCTAssertLessThan(transition, center)
+        XCTAssertGreaterThan(innerEdge, transition)
+        XCTAssertLessThan(innerEdge, center)
+        XCTAssertEqual(try XCTUnwrap(bitmap.colorAt(x: 120, y: 200)).alphaComponent, 1, accuracy: 0.001)
         XCTAssertEqual(center, 1, accuracy: 0.001)
+        view.setFrameSize(NSSize(width: 600, height: 600)); view.layout()
+        let largeImage = try XCTUnwrap(dimming.mask?.contents) as! CGImage
+        let largeBitmap = NSBitmapImageRep(cgImage: largeImage)
+        XCTAssertLessThan(try XCTUnwrap(largeBitmap.colorAt(x: 120, y: 300)).alphaComponent, 1)
+        XCTAssertEqual(try XCTUnwrap(largeBitmap.colorAt(x: 170, y: 300)).alphaComponent, 1, accuracy: 0.001)
         view.setFrameSize(.zero); view.layout()
         XCTAssertTrue(dimming.isHidden)
+    }
+
+    @MainActor func testBackdropPresentationAnimationCanReverse() throws {
+        let view = NMPrivateBackdropView(frame: NSRect(x: 0, y: 0, width: 320, height: 400))
+        view.layout()
+        let layers = try XCTUnwrap(view.layer?.sublayers)
+        XCTAssertEqual(layers.count, 2)
+        view.setPresented(false, animated: false)
+        XCTAssertTrue(layers.allSatisfy { $0.opacity == 0 && $0.animation(forKey: "presentationOpacity") == nil })
+        view.setPresented(true, animated: true)
+        XCTAssertTrue(layers.allSatisfy { $0.opacity == 1 && $0.animation(forKey: "presentationOpacity") != nil })
+        view.setPresented(false, animated: true)
+        XCTAssertTrue(layers.allSatisfy { $0.opacity == 0 && $0.animation(forKey: "presentationOpacity") != nil })
+        view.setPresented(true, animated: false)
+        XCTAssertTrue(layers.allSatisfy { $0.opacity == 1 && $0.animation(forKey: "presentationOpacity") == nil })
     }
 
     @MainActor func testPrivateBackdropUsesFilterWithoutHUDFallback() throws {
@@ -85,37 +113,43 @@ final class ModelTests: XCTestCase {
         XCTAssertTrue(layer.isHidden)
     }
 
-    func testBackdropScreenCoordinatesAndBounds() throws {
-        let screen = CGRect(x: -1440, y: 200, width: 1440, height: 900)
-        let view = CGRect(x: -1300, y: 350, width: 400, height: 300)
-        let geometry = try XCTUnwrap(BackdropGeometry.make(view: view, screen: screen))
-        XCTAssertEqual(geometry.source, CGRect(x: 140, y: 450, width: 400, height: 300))
-        XCTAssertEqual(geometry.destination, CGRect(x: 0, y: 0, width: 400, height: 300))
-        XCTAssertNil(BackdropGeometry.make(view: CGRect(x: -1500, y: 350, width: 400, height: 300), screen: screen))
-        XCTAssertNil(BackdropGeometry.make(view: .zero, screen: screen))
-        XCTAssertNil(BackdropGeometry.make(view: CGRect(x: Double.nan, y: 0, width: 20, height: 20), screen: screen))
+    @MainActor func testOverviewOutsideClickExcludesMenuBarButton() {
+        let panel = NSRect(x: 100, y: 100, width: 200, height: 300)
+        let status = NSRect(x: 180, y: 450, width: 100, height: 24)
+        XCTAssertFalse(AppDelegate.shouldDismissOverview(at: NSPoint(x: 200, y: 200), panel: panel, status: status))
+        XCTAssertFalse(AppDelegate.shouldDismissOverview(at: NSPoint(x: 200, y: 460), panel: panel, status: status))
+        XCTAssertTrue(AppDelegate.shouldDismissOverview(at: NSPoint(x: 400, y: 460), panel: panel, status: status))
+        XCTAssertTrue(AppDelegate.shouldDismissOverview(at: NSPoint(x: 400, y: 460), panel: panel, status: nil))
     }
-    func testBackdropFractionalCoordinatesAlignWithoutStretch() throws {
-        let geometry = try XCTUnwrap(BackdropGeometry.make(view: CGRect(x: 40.25, y: 80.75, width: 400.5, height: 300.5), screen: CGRect(x: 0, y: 0, width: 1440, height: 900)))
-        XCTAssertEqual(geometry.source, CGRect(x: 40, y: 518, width: 401, height: 302))
-        XCTAssertEqual(geometry.destination.origin.x, -0.25)
-        XCTAssertEqual(geometry.destination.origin.y, -0.75)
-    }
-    func testVariableBlurMaskAndTransparentExterior() throws {
-        XCTAssertNil(BackdropRenderer.mask(width: 0, height: 20, feather: 10))
-        XCTAssertNil(BackdropRenderer.mask(width: 10, height: 20, feather: .nan))
-        let mask = try XCTUnwrap(BackdropRenderer.mask(width: 240, height: 240, feather: 80))
-        let context = CIContext()
-        let bitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(context.createCGImage(mask, from: mask.extent)))
-        let edge = try XCTUnwrap(bitmap.colorAt(x: 1, y: 120)).redComponent
-        let middle = try XCTUnwrap(bitmap.colorAt(x: 40, y: 120)).redComponent
-        let center = try XCTUnwrap(bitmap.colorAt(x: 120, y: 120)).redComponent
-        XCTAssertLessThan(edge, middle); XCTAssertLessThan(middle, center)
-        XCTAssertGreaterThan(center, 0.99)
-        let input = CIImage(color: CIColor(red: 0.3, green: 0.4, blue: 0.6)).cropped(to: CGRect(x: 0, y: 0, width: 240, height: 240))
-        let result = NSBitmapImageRep(cgImage: try XCTUnwrap(BackdropRenderer().render(input)))
-        XCTAssertLessThan(try XCTUnwrap(result.colorAt(x: 0, y: 0)).alphaComponent, 0.01)
-        XCTAssertGreaterThan(try XCTUnwrap(result.colorAt(x: 120, y: 120)).alphaComponent, 0.99)
+
+    @MainActor func testOverviewFollowsMenuBarAfterStartup() throws {
+        _ = NSApplication.shared
+        let delegate = AppDelegate()
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        defer {
+            delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+            delegate.overviewPanel.orderOut(nil)
+            NSStatusBar.system.removeStatusItem(delegate.status)
+        }
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5))
+        let button = try XCTUnwrap(delegate.status.button)
+        let statusWindow = try XCTUnwrap(button.window)
+        let screen = try XCTUnwrap(statusWindow.screen)
+        let anchor = statusWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let panel = delegate.overviewPanel.frame
+        let expectedX = min(max(anchor.midX - panel.width / 2, screen.visibleFrame.minX + 8), screen.visibleFrame.maxX - panel.width - 8)
+        XCTAssertEqual(panel.minX, expectedX, accuracy: 1)
+        XCTAssertEqual(panel.maxY, anchor.minY - 6, accuracy: 1)
+        delegate.toggleOverview()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.55))
+        XCTAssertFalse(delegate.overviewPanel.isVisible)
+        delegate.toggleOverview()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.55))
+        XCTAssertTrue(delegate.overviewPanel.isVisible)
+        delegate.toggleOverview()
+        delegate.toggleOverview()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.55))
+        XCTAssertTrue(delegate.overviewPanel.isVisible)
     }
 
     @MainActor func testGlassContentSizingMatchesTransparencyFallback() {
@@ -125,20 +159,6 @@ final class ModelTests: XCTestCase {
             XCTAssertEqual(host.fittingSize.width, 504, accuracy: 1)
             XCTAssertEqual(host.fittingSize.height, 564, accuracy: 1)
         }
-    }
-
-    func testBackdropMaskFadesOnlyAtEdges() throws {
-        let image = WindowMaterial.edgeMask()
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
-        let y = bitmap.pixelsHigh / 2
-        func alpha(_ fraction: Double) throws -> CGFloat {
-            try XCTUnwrap(bitmap.colorAt(x: Int(Double(bitmap.pixelsWide - 1) * fraction), y: y)).alphaComponent
-        }
-        XCTAssertLessThan(try alpha(0), 0.05)
-        XCTAssertGreaterThan(try alpha(0.5), 0.95)
-        XCTAssertLessThan(try alpha(0.15), try alpha(0.3))
-        XCTAssertEqual(try alpha(0.15), try alpha(0.85), accuracy: 0.08)
-        XCTAssertEqual(image.capInsets.left, 32)
     }
 
     func testGPUCounterValidation() throws {
