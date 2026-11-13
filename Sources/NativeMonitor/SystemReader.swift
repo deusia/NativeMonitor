@@ -68,7 +68,7 @@ struct SystemReader {
         let free = UInt64(info.free_count) * page
         var swap = xsw_usage(), size = MemoryLayout<xsw_usage>.size
         let swapUsed = sysctlbyname("vm.swapusage", &swap, &size, nil, 0) == 0 ? swap.xsu_used : nil
-        // 已用口径为活跃、不可换出和压缩页，不将文件缓存当作已用。
+        // 此口径包含活跃的文件缓存，不等同于应用内存或系统内存压力。
         return MemoryReading(total: total, used: active + wired + compressed, active: active, inactive: UInt64(info.inactive_count) * page, wired: wired, compressed: compressed, free: free, swapUsed: swapUsed)
     }
     static func volume() -> VolumeReading? {
