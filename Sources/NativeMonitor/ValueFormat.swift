@@ -1,6 +1,7 @@
 import Foundation
 
 enum ValueFormat {
+    static func memoryGigabytes(_ bytes: UInt64) -> Double { Double(bytes) / 1_073_741_824 }
     static func number(_ value: Double, precision: Int) -> String {
         let digits = max(0, min(2, precision))
         let minimum = pow(10.0, -Double(digits))
