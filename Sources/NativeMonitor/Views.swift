@@ -80,26 +80,6 @@ struct DemoControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("场景")
-                Spacer()
-                Menu {
-                    ForEach(Scenario.allCases) { scenario in
-                        Button { model.scenario = scenario } label: {
-                            if model.scenario == scenario { Label(scenario.rawValue, systemImage: "checkmark") }
-                            else { Text(scenario.rawValue) }
-                        }
-                    }
-                } label: {
-                    HStack { Text(model.scenario.rawValue); Spacer(minLength: 8); Image(systemName: "chevron.down") }
-                        .padding(.horizontal, 12).frame(width: 170, height: 30)
-                        .contentShape(Rectangle())
-                        .modifier(ControlMaterial(cornerRadius: 15, reduce: model.reduceTransparency))
-                }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-                .accessibilityLabel("场景").accessibilityValue(model.scenario.rawValue)
-                .accessibilityIdentifier("scenarioPicker")
-            }
-            HStack {
                 Text("外观")
                 Spacer()
                 Menu {
@@ -160,11 +140,11 @@ struct Trend: View {
                 }
                 }
                 .chartXScale(domain: snapshot.plotStart(range)...0)
-                .chartYScale(domain: 0...snapshot.metric.maximum)
+                .chartYScale(domain: 0...snapshot.maximum)
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     if !mini {
-                        AxisMarks(position: .leading, values: [0, snapshot.metric.maximum / 2, snapshot.metric.maximum]) { value in
+                        AxisMarks(position: .leading, values: [0, snapshot.maximum / 2, snapshot.maximum]) { value in
                             AxisGridLine().foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.22) : Color.secondary.opacity(0.15))
                             AxisValueLabel {
                                 if let number = value.as(Double.self) {
@@ -259,12 +239,12 @@ struct Overview: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("性能概览").font(.headline)
-                    Text("GPU 实测 · 其余模拟").font(.system(size: 11))
+                    Text("本机实时采样 · GPU 为实验性数据").font(.system(size: 11))
                 }
                 Spacer()
                 Button { showSettings.toggle() } label: { Image(systemName: "slider.horizontal.3") }
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
-                    .accessibilityLabel("概览演示设置")
+                    .accessibilityLabel("概览设置")
                     .popover(isPresented: $showSettings) {
                         DemoControls(model: model).padding(14).frame(width: 350)
                     }
@@ -298,7 +278,7 @@ struct Overview: View {
                 HStack {
                     Label(metric.rawValue, systemImage: metric.symbol).font(.system(size: 12, weight: .medium))
                     Spacer()
-                    Text(metric == .gpu ? "实时" : "模拟").font(.system(size: 10))
+                    Text("实时").font(.system(size: 10))
                 }
                 HStack(alignment: .firstTextBaseline) {
                     Text(snapshot.number).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
@@ -389,7 +369,7 @@ struct Details: View {
                     }
                     Spacer()
                 }.padding(.horizontal, 10).padding(.top, 14)
-                Text("GPU 实验性实时\n其他指标为模拟数据")
+                Text("本机实时采样\nGPU 为实验性数据")
                     .font(.system(size: 11)).foregroundStyle(.primary)
                     .padding(12).modifier(ControlMaterial(reduce: model.reduceTransparency))
                     .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.14)).padding(10)
@@ -410,7 +390,7 @@ struct Details: View {
                         Text(model.snapshot(model.metric).note)
                             .font(.callout).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-                        Text("GPU 为驱动实时样本；其他指标为模拟数据。")
+                        Text("图表仅显示本次启动后的真实样本，最多保留 30 分钟。")
                             .font(.caption).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 5)
                     }.font(.caption).foregroundStyle(.primary)
@@ -477,12 +457,12 @@ struct Details: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("演示场景与外观").accessibilityLabel("演示设置")
+            .help("外观设置").accessibilityLabel("设置")
             .popover(isPresented: $showSettings) {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack { Text("演示设置").font(.headline); Spacer(); Button("完成") { showSettings = false }.modifier(GlassButton(reduce: model.reduceTransparency)) }
+                    HStack { Text("设置").font(.headline); Spacer(); Button("完成") { showSettings = false }.modifier(GlassButton(reduce: model.reduceTransparency)) }
                     DemoControls(model: model)
-                    Text("只改变原型，不修改系统设置。").font(.caption).foregroundStyle(.primary)
+                    Text("只改变应用外观，不修改系统设置。").font(.caption).foregroundStyle(.primary)
                 }.padding(18).frame(width: 350)
             }
         }
@@ -524,7 +504,7 @@ struct Details: View {
                 VStack(alignment: .trailing, spacing: 5) {
                     Text(snapshot.status).font(.callout)
                     Text(snapshot.sourceLabel).font(.caption).foregroundStyle(.primary)
-                    if model.metric == .gpu { Text("最多 \(model.range.rawValue) 分钟 · 启动后实测").font(.caption2).foregroundStyle(.primary) }
+                    Text("最多 \(model.range.rawValue) 分钟 · 启动后实测").font(.caption2).foregroundStyle(.primary)
                 }.padding(.bottom, 5)
             }
         }
@@ -541,13 +521,13 @@ struct Details: View {
     }
     private var comparison: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack { Text("趋势对照").font(.system(size: 13, weight: .medium)); Spacer(); Text("独立量纲 · GPU 实测").font(.caption).foregroundStyle(.primary) }
+            HStack { Text("趋势对照").font(.system(size: 13, weight: .medium)); Spacer(); Text("独立量纲 · 实时采样").font(.caption).foregroundStyle(.primary) }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8)], spacing: 8) {
                 ForEach(Metric.allCases) { metric in
                     let snapshot = model.snapshot(metric)
                     Button { selectMetric(metric) } label: {
                         VStack(alignment: .leading, spacing: 9) {
-                            Text(metric == .gpu ? "GPU · 实时" : "\(metric.rawValue) · 模拟").font(.caption).foregroundStyle(.primary)
+                            Text("\(metric.rawValue) · 实时").font(.caption).foregroundStyle(.primary)
                             Text(snapshot.reading).font(.system(size: 14, weight: .medium)).monospacedDigit()
                                 .contentTransition(.numericText(value: snapshot.value ?? 0))
                                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)
@@ -563,7 +543,7 @@ struct Details: View {
     private var breakdown: some View {
         let snapshot = model.snapshot(model.metric)
         return VStack(alignment: .leading, spacing: 12) {
-            Text([Metric.cpu, .memory].contains(model.metric) ? "高占用进程 · 模拟" : "细分信息")
+            Text("细分信息")
                 .font(.system(size: 13, weight: .medium))
             if snapshot.rows.isEmpty {
                 Text(snapshot.missingReason ?? "暂无数据").font(.callout).foregroundStyle(.primary)

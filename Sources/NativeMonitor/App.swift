@@ -3,15 +3,9 @@ import SwiftUI
 import Combine
 
 struct StatusReadout {
-    static func title(_ scenario: Scenario) -> String {
-        let cpu = Snapshot(metric: .cpu, scenario: scenario)
-        let memory = Snapshot(metric: .memory, scenario: scenario)
-        let network = Snapshot(metric: .network, scenario: scenario)
+    @MainActor static func title(_ model: MonitorModel) -> String {
+        let cpu = model.snapshot(.cpu), memory = model.snapshot(.memory), network = model.snapshot(.network)
         return "\(cpu.number)\(cpu.value == nil ? "" : "%")  \(memory.number)\(memory.value == nil ? "" : "G")  ↓\(network.number)\(network.value == nil ? "" : "M")"
-    }
-    static func width(font: NSFont) -> CGFloat {
-        // 保留当前所有模拟场景所需的最大内容宽度，切换场景时不推动其他菜单栏项目。
-        ceil(Scenario.allCases.map { (title($0) as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0) + 12
     }
 }
 final class DetailWindow: NSWindow {
@@ -43,14 +37,14 @@ final class OverviewPanel: NSPanel {
     var closingWindows = Set<ObjectIdentifier>()
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
-        model.startGPU()
+        model.start()
         let statusFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        status = NSStatusBar.system.statusItem(withLength: StatusReadout.width(font: statusFont))
+        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         status.button?.target = self
         status.button?.action = #selector(toggleOverview)
         status.button?.font = statusFont
-        status.button?.setAccessibilityLabel("性能监控原型，模拟数据，点击打开概览")
-        status.button?.toolTip = "性能监控原型 · 模拟数据"
+        status.button?.setAccessibilityLabel("性能监控，点击打开概览")
+        status.button?.toolTip = "性能监控 · 实时采样"
         overviewPanel = OverviewPanel(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
         overviewPanel.isOpaque = false
         overviewPanel.backgroundColor = .clear
@@ -72,7 +66,7 @@ final class OverviewPanel: NSPanel {
                 }
             }
         }
-        model.$scenario.sink { [weak self] scenario in self?.updateStatus(scenario) }.store(in: &subscriptions)
+        model.$readings.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateStatus() }.store(in: &subscriptions)
         model.$theme.sink { [weak self] theme in
             let appearance = theme == .system ? nil : NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
             NSApp.appearance = appearance
@@ -84,7 +78,7 @@ final class OverviewPanel: NSPanel {
         DispatchQueue.main.async { [weak self] in self?.showOverview() }
     }
     func applicationWillTerminate(_ notification: Notification) {
-        model.stopGPU()
+        model.stop()
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
         if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
         if let statusMoveObserver { NotificationCenter.default.removeObserver(statusMoveObserver) }
@@ -174,9 +168,9 @@ final class OverviewPanel: NSPanel {
         else { model.detailsPresented = presented }
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(sender); return false }
-    func updateStatus(_ scenario: Scenario) {
-        status.button?.title = StatusReadout.title(scenario)
-        status.button?.toolTip = "模拟数据 · CPU / 内存 / 下载 · \(scenario.rawValue)"
+    func updateStatus() {
+        status.button?.title = StatusReadout.title(model)
+        status.button?.toolTip = "实时采样 · CPU / 内存 / 接收"
     }
     @objc func toggleOverview() { overviewPanel.isVisible && !closingWindows.contains(ObjectIdentifier(overviewPanel)) ? hideOverview() : showOverview() }
     func hideOverview() {

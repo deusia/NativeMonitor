@@ -79,19 +79,36 @@ struct SystemReader {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0 else { return nil }
         defer { freeifaddrs(list) }
-        var result: [InterfaceCounters] = []
+        var names: [UInt32: String] = [:]
         var cursor = list
         while let item = cursor {
             defer { cursor = item.pointee.ifa_next }
             let entry = item.pointee
             guard let address = entry.ifa_addr, address.pointee.sa_family == UInt8(AF_LINK),
                   entry.ifa_flags & UInt32(IFF_UP) != 0, entry.ifa_flags & UInt32(IFF_RUNNING) != 0,
-                  entry.ifa_flags & UInt32(IFF_LOOPBACK) == 0, let data = entry.ifa_data else { continue }
+                  entry.ifa_flags & UInt32(IFF_LOOPBACK) == 0 else { continue }
             let name = String(cString: entry.ifa_name)
             // 只统计硬件网络接口，避免 VPN 和桥接流量重复计算。
-            guard name.hasPrefix("en") else { continue }
-            let counters = data.assumingMemoryBound(to: if_data.self).pointee
-            result.append(InterfaceCounters(name: name, counters: Counters(first: UInt64(counters.ifi_ibytes), second: UInt64(counters.ifi_obytes))))
+            if name.hasPrefix("en") { names[if_nametoindex(name)] = name }
+        }
+        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
+        var size = 0
+        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: MemoryLayout<if_msghdr2>.alignment)
+        defer { buffer.deallocate() }
+        guard sysctl(&mib, u_int(mib.count), buffer, &size, nil, 0) == 0 else { return nil }
+        var result: [InterfaceCounters] = [], offset = 0
+        while offset + 4 <= size {
+            let message = buffer.advanced(by: offset)
+            let length = Int(message.loadUnaligned(as: UInt16.self))
+            guard length >= 4, offset + length <= size else { return nil }
+            if message.load(fromByteOffset: 3, as: UInt8.self) == RTM_IFINFO2, length >= MemoryLayout<if_msghdr2>.size {
+                let info = buffer.advanced(by: offset).loadUnaligned(as: if_msghdr2.self)
+                if let name = names[UInt32(info.ifm_index)] {
+                    result.append(InterfaceCounters(name: name, counters: Counters(first: info.ifm_data.ifi_ibytes, second: info.ifm_data.ifi_obytes)))
+                }
+            }
+            offset += length
         }
         return result.sorted { $0.name < $1.name }
     }

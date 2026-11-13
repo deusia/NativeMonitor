@@ -4,21 +4,6 @@ import PrivateBackdrop
 import SwiftUI
 @testable import NativeMonitor
 final class ModelTests: XCTestCase {
-    func testChartSampleIdentitySurvivesHistoryPruning() throws {
-        let date = Date(timeIntervalSinceReferenceDate: 1000)
-        let first = GPUReading(date: date.addingTimeInterval(-4), driver: "test", utilization: 20, renderer: nil, tiler: nil)
-        let second = GPUReading(date: date.addingTimeInterval(-2), driver: "test", utilization: 40, renderer: nil, tiler: nil)
-        var snapshot = Snapshot(metric: .gpu, scenario: .normal, gpuReading: second, gpuHistory: [first, second], gpuEnabled: true, now: date)
-        let before = try XCTUnwrap(snapshot.samples(.short).last)
-        snapshot.gpuHistory = [second]
-        let after = try XCTUnwrap(snapshot.samples(.short).last)
-        XCTAssertEqual(before.id, after.id)
-        XCTAssertEqual(before.value, after.value)
-        XCTAssertEqual(before, after)
-        let empty = Snapshot(metric: .gpu, scenario: .empty, gpuReading: second, gpuHistory: [second], gpuEnabled: true, now: date)
-        XCTAssertTrue(empty.samples(.short).isEmpty)
-    }
-
     func testResizeHitRegionsAndContentPassThrough() {
         let bounds = NSRect(x: 0, y: 0, width: 800, height: 600)
         let cases: [(NSPoint, ResizeEdges)] = [
@@ -172,80 +157,16 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(zero.renderer, 20)
         XCTAssertNil(zero.tiler)
     }
-    func testRealGPUHistoryNeverSynthesizesSamples() throws {
+    func testRealHistoryIsTimeBoundedAndMissingClearsChart() {
         let now = Date(timeIntervalSince1970: 2000)
-        let history = try [(-400.0, 15.0), (-120.0, 20.0), (-2.0, 0.0)].map { offset, value in
-            try GPUReading.parse(["Device Utilization %": value], driver: "AGX-test", date: now.addingTimeInterval(offset))
-        }
-        let snapshot = Snapshot(metric: .gpu, scenario: .normal, gpuReading: history.last, gpuHistory: history, gpuEnabled: true, now: now)
+        let current = MetricReading(date: now, value: 0, status: "正常", facts: [], rows: [])
+        let history = [TimedValue(date: now.addingTimeInterval(-400), value: 15), TimedValue(date: now.addingTimeInterval(-2), value: 0)]
+        var snapshot = Snapshot(metric: .network, current: current, history: history, now: now)
+        XCTAssertEqual(snapshot.samples(.short).map(\.value), [0])
+        XCTAssertEqual(snapshot.samples(.long).count, 2)
         XCTAssertEqual(snapshot.value, 0)
-        XCTAssertEqual(snapshot.samples(.short).map(\.value), [20, 0])
-        XCTAssertEqual(snapshot.samples(.long).count, 3)
-        XCTAssertEqual(snapshot.plotStart(.short), -2)
-        XCTAssertEqual(snapshot.samples(.short).last!.minute, -2.0 / 60, accuracy: 0.0001)
-        XCTAssertTrue(snapshot.sourceLabel.contains("实时"))
-        var missing = snapshot
-        missing.gpuReading = nil
-        XCTAssertNil(missing.value)
-        XCTAssertTrue(missing.samples(.short).isEmpty)
-        let empty = Snapshot(metric: .gpu, scenario: .empty, gpuReading: history.last, gpuHistory: history, gpuEnabled: true, now: now)
-        XCTAssertNil(empty.value)
-        XCTAssertTrue(empty.samples(.short).isEmpty)
-        XCTAssertTrue(empty.facts.allSatisfy { $0.value == "—" || $0.value == "暂无有效样本" })
-    }
-    func testCompactStatusWidthFitsEveryScenario() {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        let width = StatusReadout.width(font: font)
-        XCTAssertLessThan(width, 200)
-        for scenario in Scenario.allCases {
-            let title = StatusReadout.title(scenario)
-            XCTAssertLessThanOrEqual((title as NSString).size(withAttributes: [.font: font]).width + 12, width)
-            XCTAssertFalse(title.contains("CPU"))
-            XCTAssertTrue(title.contains("↓"))
-            if scenario == .empty { XCTAssertFalse(title.contains("0")) }
-        }
-        print("菜单栏宽度：\(width) pt（原 266 pt）")
-    }
-    func testGPUIsUnavailableWithoutInventedHistory() {
-        let s = Snapshot(metric: .gpu, scenario: .normal)
-        XCTAssertNil(s.value); XCTAssertEqual(s.missingReason, "来源未验证")
-        XCTAssertTrue(s.samples(.short).isEmpty)
-        XCTAssertTrue(s.note.contains("统一内存"))
-    }
-    func testDisconnectedAndZeroTrafficDiffer() {
-        let offline = Snapshot(metric: .network, scenario: .offline)
-        let idle = Snapshot(metric: .network, scenario: .idle)
-        XCTAssertNil(offline.value); XCTAssertTrue(offline.samples(.long).isEmpty)
-        XCTAssertEqual(idle.value, 0); XCTAssertTrue(idle.samples(.long).allSatisfy { $0.value == 0 })
-        XCTAssertEqual(offline.status, "未连接"); XCTAssertEqual(idle.status, "已连接 · 零流量")
-    }
-    func testEmptyStateNeverLeaksValues() {
-        for metric in Metric.allCases {
-            let s = Snapshot(metric: metric, scenario: .empty)
-            XCTAssertNil(s.value); XCTAssertEqual(s.reading, "—"); XCTAssertTrue(s.rows.isEmpty)
-            XCTAssertTrue(s.facts.allSatisfy { $0.value == "—" })
-            for range in HistoryRange.allCases { XCTAssertTrue(s.samples(range).isEmpty) }
-        }
-    }
-    func testHistoryBoundsAndCurrentValue() {
-        for metric in Metric.allCases where metric != .gpu {
-            let s = Snapshot(metric: metric, scenario: .normal)
-            for range in HistoryRange.allCases {
-                let samples = s.samples(range)
-                XCTAssertEqual(samples.count, 18)
-                XCTAssertEqual(samples.first?.minute, -Double(range.rawValue))
-                XCTAssertEqual(samples.last?.minute, 0)
-                XCTAssertEqual(samples.last?.value, s.value)
-                XCTAssertTrue(samples.allSatisfy { $0.value.isFinite && $0.value >= 0 && $0.value <= metric.maximum })
-                XCTAssertTrue(zip(samples, samples.dropFirst()).allSatisfy { $0.minute < $1.minute })
-            }
-            XCTAssertNotEqual(s.samples(.short).map(\.value), s.samples(.long).map(\.value))
-        }
-    }
-    func testDiskCapacitySeparateFromRate() {
-        let s = Snapshot(metric: .disk, scenario: .normal)
-        XCTAssertEqual(s.reading, "18 MB/s")
-        XCTAssertEqual(s.rows.first(where: { $0.label == "可用容量" })?.value, "482 GB")
-        XCTAssertEqual(s.facts.first(where: { $0.label == "写入" })?.value, "4.2 MB/s")
+        snapshot.current = nil
+        XCTAssertTrue(snapshot.samples(.short).isEmpty)
+        XCTAssertNil(snapshot.value)
     }
 }

@@ -32,4 +32,21 @@ final class SystemReaderTests: XCTestCase {
         XCTAssertNotNil(SystemReader.network())
         XCTAssertNotNil(SystemReader.disk())
     }
+    func testCollectorProducesRealValuesAfterBaseline() throws {
+        let collector = MonitorCollector()
+        let first = collector.read()
+        XCTAssertNil(first[.cpu]?.value)
+        XCTAssertNil(first[.disk]?.value)
+        XCTAssertNil(first[.network]?.value)
+        Thread.sleep(forTimeInterval: 0.15)
+        let second = collector.read()
+        let cpu = try XCTUnwrap(second[.cpu]?.value)
+        XCTAssertTrue((0...100).contains(cpu))
+        XCTAssertGreaterThan(try XCTUnwrap(second[.memory]?.value), 0)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(second[.disk]?.value), 0)
+        if let interfaces = SystemReader.network(), !interfaces.isEmpty {
+            XCTAssertGreaterThanOrEqual(try XCTUnwrap(second[.network]?.value), 0)
+        }
+        XCTAssertNotNil(second[.gpu])
+    }
 }
