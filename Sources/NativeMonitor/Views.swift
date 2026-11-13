@@ -99,6 +99,9 @@ struct MonitorSettings: View {
                 .accessibilityLabel("外观").accessibilityValue(model.theme.rawValue)
                 .accessibilityIdentifier("themePicker")
             }
+            Picker("历史范围", selection: $model.range) {
+                ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
+            }
             Picker("采样间隔", selection: $model.interval) {
                 Text("1 秒").tag(1); Text("2 秒").tag(2); Text("5 秒").tag(5)
             }
@@ -313,37 +316,48 @@ struct RangePicker: View {
     @ObservedObject var model: MonitorModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
-    private let segmentWidth: CGFloat = 62
+    private let quickRanges: [HistoryRange] = [.short, .long]
     var body: some View {
-        Group {
-            if #available(macOS 26.0, *), !model.reduceTransparency && !systemReduce {
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 12).fill(.clear)
-                        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
-                        .frame(width: segmentWidth, height: 28)
-                        .offset(x: CGFloat(HistoryRange.allCases.firstIndex(of: model.range) ?? 0) * segmentWidth)
-                        .allowsHitTesting(false)
-                    HStack(spacing: 0) {
-                        ForEach(HistoryRange.allCases) { range in
-                            Button {
-                                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
-                                    model.range = range
+        HStack(spacing: 8) {
+            if !quickRanges.contains(model.range) {
+                Text(model.range.label).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityLabel("当前历史范围：\(model.range.label)")
+            }
+            Group {
+                if #available(macOS 26.0, *), !model.reduceTransparency && !systemReduce {
+                    ZStack(alignment: .leading) {
+                        if let index = quickRanges.firstIndex(of: model.range) {
+                            RoundedRectangle(cornerRadius: 12).fill(.clear)
+                                .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
+                                .frame(width: 84, height: 28)
+                                .offset(x: CGFloat(index) * 84)
+                                .allowsHitTesting(false)
+                        }
+                        HStack(spacing: 0) {
+                            ForEach(quickRanges) { range in
+                                Button {
+                                    withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
+                                        model.range = range
+                                    }
+                                } label: {
+                                    Text(range.label).frame(maxWidth: .infinity).frame(height: 28)
+                                        .contentShape(Rectangle())
                                 }
-                            } label: {
-                                Text(range.label).frame(width: segmentWidth, height: 28)
-                                    .contentShape(Rectangle())
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(model.range == range ? .isSelected : [])
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(model.range == range ? .isSelected : [])
                         }
                     }
+                } else {
+                    Picker("历史范围", selection: Binding<HistoryRange?>(
+                        get: { quickRanges.contains(model.range) ? model.range : nil },
+                        set: { if let range = $0 { model.range = range } }
+                    )) {
+                        ForEach(quickRanges) { Text($0.label).tag(Optional.some($0)) }
+                    }.pickerStyle(.segmented).labelsHidden()
                 }
-            } else {
-                Picker("历史范围", selection: $model.range) {
-                    ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden()
-            }
-        }.frame(width: segmentWidth * CGFloat(HistoryRange.allCases.count)).accessibilityIdentifier("rangePicker")
+            }.frame(width: 168)
+        }.accessibilityIdentifier("rangePicker")
     }
 }
 
