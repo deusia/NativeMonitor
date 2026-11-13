@@ -2,6 +2,27 @@ import XCTest
 @testable import NativeMonitor
 
 final class SensorTests: XCTestCase {
+    func testM5TemperatureMappingAndAverage() {
+        let readings = [
+            SensorReading(id: "Tp00", value: 40, unit: "°C"),
+            SensorReading(id: "Tp0O", value: 60, unit: "°C"),
+            SensorReading(id: "Tp04", value: 0, unit: "°C"),
+            SensorReading(id: "Tp08", value: 111, unit: "°C"),
+            SensorReading(id: "Tg0U", value: 70, unit: "°C"),
+            SensorReading(id: "Tp99", value: 100, unit: "°C")
+        ]
+        let cpu = SensorReading.temperatureAverage(readings, chip: "Apple M5 Max", gpu: false)
+        XCTAssertEqual(cpu?.value, 50)
+        XCTAssertEqual(cpu?.count, 2)
+        XCTAssertEqual(SensorReading.temperatureAverage(readings, chip: "Apple M5 Max", gpu: true)?.value, 70)
+        XCTAssertNil(SensorReading.temperatureAverage(readings, chip: "Apple M4 Max", gpu: false))
+        XCTAssertNil(SensorReading.temperatureAverage([], chip: "Apple M5 Max", gpu: false))
+        XCTAssertEqual(SensorReading.m5SensorName("Tp0O", chip: "Apple M5 Max"), "CPU 性能核心簇测点 1")
+        XCTAssertEqual(SensorReading.m5SensorName("TB0T", chip: "Apple M5 Max"), "电池温度测点")
+        XCTAssertEqual(SensorReading.m5SensorName("TW0P", chip: "Apple M5 Max"), "无线模块附近测点")
+        XCTAssertNil(SensorReading.m5SensorName("TD00", chip: "Apple M5 Max"))
+        XCTAssertNil(SensorReading.m5SensorName("Tp0O", chip: "Apple M4 Max"))
+    }
     func testDecodeSensorValues() {
         XCTAssertEqual(SensorReader.decode([0x2a, 0x80], type: "sp78"), 42.5)
         XCTAssertEqual(SensorReader.decode([0xff, 0x00], type: "sp78"), -1)
@@ -22,7 +43,7 @@ final class SensorTests: XCTestCase {
         XCTAssertEqual(groups[1].readings.map(\.id), ["TB0T", "TB1T"])
         XCTAssertTrue(SensorReading.temperatureGroups([]).isEmpty)
         XCTAssertEqual(readings[1].displayName, "风扇 1（F0Ac）")
-        XCTAssertEqual(readings[0].displayName, "TB1T")
+        XCTAssertTrue(readings[0].displayName.hasSuffix("（TB1T）"))
         XCTAssertEqual(SensorReading(id: "FZAc", value: 0, unit: "rpm").displayName, "FZAc")
     }
 }

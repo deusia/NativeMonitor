@@ -6,7 +6,45 @@ struct SensorReading: Identifiable {
     let value: Double
     let unit: String
 
+    // M5 测点参考 Stats；Apple 未公开这些键与物理位置的稳定映射。
+    private static let m5CPU = ["Tp00", "Tp04", "Tp08", "Tp0C", "Tp0G", "Tp0K", "Tp0O", "Tp0R", "Tp0U", "Tp0X", "Tp0a", "Tp0d", "Tp0g", "Tp0j", "Tp0m", "Tp0p", "Tp0u", "Tp0y"]
+    private static let m5GPU = ["Tg0U", "Tg0X", "Tg0d", "Tg0g", "Tg0j", "Tg1Y", "Tg1c", "Tg1g"]
+    static let chipName: String = {
+        var size = 0
+        guard sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0) == 0, size > 0 else { return "" }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("machdep.cpu.brand_string", &buffer, &size, nil, 0) == 0 else { return "" }
+        return String(cString: buffer)
+    }()
+
+    static func m5SensorName(_ id: String, chip: String) -> String? {
+        guard ["Apple M5", "Apple M5 Pro", "Apple M5 Max", "Apple M5 Ultra"].contains(chip) else { return nil }
+        if let index = m5CPU.firstIndex(of: id) {
+            return index < 6 ? "CPU 超级核心簇测点 \(index + 1)" : "CPU 性能核心簇测点 \(index - 5)"
+        }
+        if let index = m5GPU.firstIndex(of: id) { return "GPU 测点 \(index + 1)" }
+        // 这些名称是第三方跨机型参考，并不保证物理位置或传感器类型一致。
+        switch id {
+        case "TB0T": return "电池温度测点"
+        case "TB1T": return "电池温度测点 1"
+        case "TB2T": return "电池温度测点 2"
+        case "TW0P": return "无线模块附近测点"
+        case "TH0x": return "存储设备温度最大值"
+        default: break
+        }
+        return nil
+    }
+
+    static func temperatureAverage(_ readings: [SensorReading], chip: String, gpu: Bool) -> (value: Double, count: Int)? {
+        guard ["Apple M5", "Apple M5 Pro", "Apple M5 Max", "Apple M5 Ultra"].contains(chip) else { return nil }
+        let keys = gpu ? m5GPU : m5CPU
+        let values = readings.filter { $0.unit == "°C" && keys.contains($0.id) && $0.value.isFinite && $0.value > 0 && $0.value <= 110 }.map(\.value)
+        guard !values.isEmpty else { return nil }
+        return (values.reduce(0, +) / Double(values.count), values.count)
+    }
+
     var displayName: String {
+        if unit == "°C" { return "\(Self.m5SensorName(id, chip: Self.chipName) ?? "部件未知")（\(id)）" }
         guard unit == "rpm", id.count == 4, id.first == "F", id.hasSuffix("Ac"),
               let index = Int(String(id.dropFirst().prefix(1)), radix: 16) else { return id }
         return "风扇 \(index + 1)（\(id)）"
