@@ -5,7 +5,7 @@ import Combine
 struct StatusReadout {
     @MainActor static func title(_ model: MonitorModel) -> String {
         let cpu = model.snapshot(.cpu), memory = model.snapshot(.memory), network = model.snapshot(.network)
-        return "\(cpu.number)\(cpu.value == nil ? "" : "%")  \(memory.number)\(memory.value == nil ? "" : "G")  ↓\(network.number)\(network.value == nil ? "" : "M")"
+        return "\(cpu.number)\(cpu.value == nil ? "" : "%")  \(memory.number)\(memory.value == nil ? "" : "G")  ↓\(network.value == nil ? "—" : network.reading)"
     }
 }
 final class DetailWindow: NSWindow {
@@ -67,6 +67,8 @@ final class OverviewPanel: NSPanel {
             }
         }
         model.$readings.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateStatus() }.store(in: &subscriptions)
+        model.$cpuScale.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateStatus() }.store(in: &subscriptions)
+        model.$precision.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateStatus() }.store(in: &subscriptions)
         model.$theme.sink { [weak self] theme in
             let appearance = theme == .system ? nil : NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
             NSApp.appearance = appearance

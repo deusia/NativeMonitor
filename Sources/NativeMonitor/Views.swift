@@ -74,7 +74,7 @@ struct ControlMaterial: ViewModifier {
         }
     }
 }
-struct DemoControls: View {
+struct MonitorSettings: View {
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @ObservedObject var model: MonitorModel
     var body: some View {
@@ -99,6 +99,17 @@ struct DemoControls: View {
                 .accessibilityLabel("外观").accessibilityValue(model.theme.rawValue)
                 .accessibilityIdentifier("themePicker")
             }
+            Picker("采样间隔", selection: $model.interval) {
+                Text("1 秒").tag(1); Text("2 秒").tag(2); Text("5 秒").tag(5)
+            }
+            Picker("CPU 口径", selection: $model.cpuScale) {
+                ForEach(CPUScale.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Picker("主读数小数位", selection: $model.precision) {
+                Text("最多 0 位").tag(0); Text("最多 1 位").tag(1); Text("最多 2 位").tag(2)
+            }
+            Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
             if !model.reduceTransparency && !systemReduce {
                 BackdropStatus(diagnostics: model.backdropDiagnostics)
@@ -148,7 +159,7 @@ struct Trend: View {
                             AxisGridLine().foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.22) : Color.secondary.opacity(0.15))
                             AxisValueLabel {
                                 if let number = value.as(Double.self) {
-                                    Text("\(number.formatted()) \(snapshot.metric.unit)").foregroundStyle(.primary)
+                                    Text(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)).foregroundStyle(.primary)
                                 }
                             }
                         }
@@ -246,7 +257,7 @@ struct Overview: View {
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
                     .accessibilityLabel("概览设置")
                     .popover(isPresented: $showSettings) {
-                        DemoControls(model: model).padding(14).frame(width: 350)
+                        MonitorSettings(model: model).padding(14).frame(width: 350)
                     }
                 Button(action: close) { Image(systemName: "xmark") }
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
@@ -284,7 +295,7 @@ struct Overview: View {
                     Text(snapshot.number).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
                         .contentTransition(.numericText(value: snapshot.value ?? 0))
                         .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)
-                    if snapshot.value != nil { Text(metric.unit).font(.caption) }
+                    if snapshot.value != nil { Text(snapshot.unit).font(.caption) }
                     Spacer(minLength: 0)
                 }
                 Text(snapshot.status).font(.system(size: 11)).lineLimit(2)
@@ -458,12 +469,12 @@ struct Details: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("外观设置").accessibilityLabel("设置")
+            .help("监控设置").accessibilityLabel("设置")
             .popover(isPresented: $showSettings) {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack { Text("设置").font(.headline); Spacer(); Button("完成") { showSettings = false }.modifier(GlassButton(reduce: model.reduceTransparency)) }
-                    DemoControls(model: model)
-                    Text("只改变应用外观，不修改系统设置。").font(.caption).foregroundStyle(.primary)
+                    MonitorSettings(model: model)
+                    Text("设置只影响本应用。").font(.caption).foregroundStyle(.primary)
                 }.padding(18).frame(width: 350)
             }
         }
@@ -499,7 +510,7 @@ struct Details: View {
                         .id(model.metric)
                         .contentTransition(.numericText(value: snapshot.value ?? 0))
                         .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)
-                    if snapshot.value != nil { Text(model.metric.unit).font(.title3).foregroundStyle(.primary) }
+                    if snapshot.value != nil { Text(snapshot.unit).font(.title3).foregroundStyle(.primary) }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 5) {

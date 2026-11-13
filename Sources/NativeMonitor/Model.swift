@@ -11,6 +11,10 @@ enum Metric: String, CaseIterable, Identifiable {
         switch self { case .cpu, .gpu: "%"; case .memory: "GB"; case .disk, .network: "MB/s" }
     }
 }
+enum CPUScale: String, CaseIterable, Identifiable {
+    case total = "核心总量", average = "整机比例"
+    var id: String { rawValue }
+}
 enum Theme: String, CaseIterable, Identifiable {
     case system = "跟随系统", light = "浅色", dark = "深色"
     var id: String { rawValue }
@@ -30,32 +34,46 @@ struct MetricReading {
     let facts: [Fact]
     let rows: [Fact]
     var cores: [Double?] = []
+    var cpuParts: [Double] = []
 }
 struct Snapshot {
     let metric: Metric
     var current: MetricReading?
     var history: [TimedValue] = []
     var now = Date()
+    var cpuScale: CPUScale = .total
+    var precision: Int = 1
+    var cpuFactor: Double { metric == .cpu && cpuScale == .average ? 1 / Double(max(current?.cores.count ?? 0, 1)) : 1 }
     var sourceLabel: String { metric == .gpu ? "实验性实时 · IORegistry" : "本机实时采样" }
     var missingReason: String? { current?.value == nil ? (current?.status ?? "等待真实样本") : nil }
-    var value: Double? { current?.value }
-    var number: String { value.map { $0.formatted(.number.precision(.fractionLength(0...2))) } ?? "—" }
-    var reading: String { value == nil ? "—" : "\(number) \(metric.unit)" }
+    var value: Double? { current?.value.map { $0 * cpuFactor } }
+    var formatted: (String, String) {
+        guard let value else { return ("—", metric.unit) }
+        return ValueFormat.display(value, metric: metric, precision: precision)
+    }
+    var number: String { formatted.0 }
+    var unit: String { formatted.1 }
+    var reading: String { value == nil ? "—" : "\(number) \(unit)" }
     var status: String { current?.status ?? "等待真实样本" }
-    var facts: [Fact] { current?.facts ?? [] }
+    var facts: [Fact] {
+        if metric == .cpu, let parts = current?.cpuParts, parts.count == 3 {
+            return zip(["用户", "系统", "空闲"], parts).map { Fact(label: $0.0, value: "\(ValueFormat.number($0.1 * cpuFactor, precision: precision)) %") }
+        }
+        return current?.facts ?? []
+    }
     var rows: [Fact] {
         var result = current?.rows ?? []
         let values = samples(.long).map(\.value)
         if !values.isEmpty {
             let average = values.reduce(0, +) / Double(values.count)
             let peak = values.max() ?? 0
-            result.append(Fact(label: "启动后样本均值（最多 30 分钟）", value: "\(average.formatted(.number.precision(.fractionLength(0...2)))) \(metric.unit)"))
-            result.append(Fact(label: "启动后样本峰值（最多 30 分钟）", value: "\(peak.formatted(.number.precision(.fractionLength(0...2)))) \(metric.unit)"))
+            result.append(Fact(label: "启动后样本均值（最多 30 分钟）", value: ValueFormat.reading(average, metric: metric, precision: precision)))
+            result.append(Fact(label: "启动后样本峰值（最多 30 分钟）", value: ValueFormat.reading(peak, metric: metric, precision: precision)))
         }
         return result
     }
     var maximum: Double {
-        if metric == .cpu { return Double(max(current?.cores.count ?? 0, 1)) * 100 }
+        if metric == .cpu { return Double(max(current?.cores.count ?? 0, 1)) * 100 * cpuFactor }
         if metric == .gpu { return 100 }
         return max(1, (samples(.long).map(\.value).max() ?? value ?? 0) * 1.2)
     }
@@ -77,16 +95,23 @@ struct Snapshot {
         return history.compactMap { item in
             let minute = item.date.timeIntervalSince(now) / 60
             guard minute >= -Double(range.rawValue), minute <= 0 else { return nil }
-            return Sample(id: item.date.timeIntervalSinceReferenceDate, minute: minute, value: item.value)
+            return Sample(id: item.date.timeIntervalSinceReferenceDate, minute: minute, value: item.value * cpuFactor)
         }
     }
 }
 
 @MainActor final class MonitorModel: ObservableObject {
     @Published var metric: Metric = .cpu
-    @Published var theme: Theme = .system
-    @Published var range: HistoryRange = .short
-    @Published var reduceTransparency = false
+    private let defaults: UserDefaults
+    @Published var theme: Theme { didSet { defaults.set(theme.rawValue, forKey: "theme") } }
+    @Published var range: HistoryRange { didSet { defaults.set(range.rawValue, forKey: "historyRange") } }
+    @Published var reduceTransparency: Bool { didSet { defaults.set(reduceTransparency, forKey: "reduceTransparency") } }
+    @Published var cpuScale: CPUScale { didSet { defaults.set(cpuScale.rawValue, forKey: "cpuScale") } }
+    @Published var precision: Int { didSet { defaults.set(precision, forKey: "precision") } }
+    @Published var interval: Int { didSet {
+        defaults.set(interval, forKey: "samplingInterval")
+        if timer != nil { stop(); schedule() }
+    } }
     @Published var overviewPresented = false
     @Published var detailsPresented = false
     let backdropDiagnostics = BackdropDiagnostics()
@@ -100,10 +125,24 @@ struct Snapshot {
     private var gpuRequestDate: Date?
     private let collector = MonitorCollector()
 
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        theme = Theme(rawValue: defaults.string(forKey: "theme") ?? "") ?? .system
+        range = HistoryRange(rawValue: defaults.integer(forKey: "historyRange")) ?? .short
+        reduceTransparency = defaults.bool(forKey: "reduceTransparency")
+        cpuScale = CPUScale(rawValue: defaults.string(forKey: "cpuScale") ?? "") ?? .total
+        let storedPrecision = defaults.object(forKey: "precision") as? Int
+        precision = [0, 1, 2].contains(storedPrecision ?? -1) ? storedPrecision! : 1
+        let storedInterval = defaults.integer(forKey: "samplingInterval")
+        interval = [1, 2, 5].contains(storedInterval) ? storedInterval : 2
+    }
     func start() {
         guard timer == nil else { return }
         refresh()
-        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+        schedule()
+    }
+    private func schedule() {
+        let timer = Timer(timeInterval: TimeInterval(interval), repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -112,10 +151,10 @@ struct Snapshot {
     func stop() { timer?.invalidate(); timer = nil }
     private func refresh() {
         now = Date()
-        if inFlight, requestDate.map({ now.timeIntervalSince($0) > 6 }) == true {
+        if inFlight, requestDate.map({ now.timeIntervalSince($0) > Double(max(6, interval * 3)) }) == true {
             for metric in Metric.allCases where metric != .gpu { setUnavailable(metric) }
         }
-        if gpuInFlight, gpuRequestDate.map({ now.timeIntervalSince($0) > 6 }) == true { setUnavailable(.gpu) }
+        if gpuInFlight, gpuRequestDate.map({ now.timeIntervalSince($0) > Double(max(6, interval * 3)) }) == true { setUnavailable(.gpu) }
         let collector = collector
         if !inFlight {
             inFlight = true
@@ -155,6 +194,6 @@ struct Snapshot {
         } else { histories[metric] = [] }
     }
     func snapshot(_ metric: Metric) -> Snapshot {
-        Snapshot(metric: metric, current: readings[metric], history: histories[metric] ?? [], now: now)
+        Snapshot(metric: metric, current: readings[metric], history: histories[metric] ?? [], now: now, cpuScale: cpuScale, precision: precision)
     }
 }
