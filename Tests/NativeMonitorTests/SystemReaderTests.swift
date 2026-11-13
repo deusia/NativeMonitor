@@ -59,7 +59,7 @@ final class SystemReaderTests: XCTestCase {
         if let interfaces = SystemReader.network(), !interfaces.isEmpty {
             XCTAssertGreaterThanOrEqual(try XCTUnwrap(second[.network]?.value), 0)
         }
-        XCTAssertFalse(MonitorCollector.readGPU().status.isEmpty)
+        XCTAssertFalse(collector.readGPU().status.isEmpty)
     }
     func testNetworkCountersMatchNetstatWithoutTruncation() throws {
         let before = try XCTUnwrap(SystemReader.network())
