@@ -191,7 +191,7 @@ struct Trend: View {
 struct DetailSeriesChart: View {
     let snapshot: Snapshot
     let range: HistoryRange
-    private let colors: [String: Color] = ["用户": .blue, "系统": .orange, "设备": .blue,
+    static let colors: [String: Color] = ["用户": .blue, "系统": .orange, "设备": .blue,
         "渲染器": .purple, "分块器": .orange, "活跃": .blue, "不可换出": .orange,
         "压缩": .purple, "非活跃": .teal, "空闲": .green, "读取": .blue, "写入": .orange, "接收": .blue, "发送": .orange]
     var body: some View {
@@ -204,7 +204,7 @@ struct DetailSeriesChart: View {
             } else {
                 Chart {
                     ForEach(points) { point in
-                        let color = colors[point.name] ?? .gray
+                        let color = Self.colors[point.name] ?? .gray
                         AreaMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment), stacking: .unstacked)
                             .interpolationMethod(.monotone)
                             .foregroundStyle(LinearGradient(colors: [color.opacity(snapshot.metric == .memory ? 0.10 : 0.18), color.opacity(0.01)], startPoint: .top, endPoint: .bottom))
@@ -216,7 +216,7 @@ struct DetailSeriesChart: View {
                     ForEach(names, id: \.self) { name in
                         if let latest = points.last(where: { $0.name == name }) {
                             PointMark(x: .value("时间", latest.minute), y: .value(snapshot.metric.unit, latest.value))
-                                .symbolSize(22).foregroundStyle(colors[name] ?? .gray)
+                                .symbolSize(22).foregroundStyle(Self.colors[name] ?? .gray)
                         }
                     }
                 }
@@ -237,11 +237,76 @@ struct DetailSeriesChart: View {
                     ForEach(names, id: \.self) { name in
                         Label(name, systemImage: "circle.fill")
                             .labelStyle(.titleAndIcon)
-                            .foregroundStyle(colors[name] ?? .gray)
+                            .foregroundStyle(Self.colors[name] ?? .gray)
                     }
                 }.font(.caption)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+struct MemorySeriesCharts: View {
+    let snapshot: Snapshot
+    let range: HistoryRange
+    let reduce: Bool
+    private let names = ["活跃", "非活跃", "不可换出", "压缩", "空闲"]
+    var body: some View {
+        let points = snapshot.seriesSamples(range)
+        VStack(alignment: .leading, spacing: 12) {
+            Label("内存分项趋势", systemImage: "chart.xyaxis.line").font(.headline)
+            Text("各图纵轴独立缩放，刻度单位为 GB；高度不能直接比较。")
+                .font(.caption).foregroundStyle(.secondary)
+            if points.isEmpty {
+                Text(snapshot.missingReason ?? "等待分项样本").foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], alignment: .leading, spacing: 10) {
+                    ForEach(names, id: \.self) { name in
+                        let samples = points.filter { $0.name == name }
+                        let scale = MemoryTrendScale.domain(samples.map(\.value))
+                        let color = DetailSeriesChart.colors[name] ?? .gray
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(name, systemImage: "circle.fill").foregroundStyle(color)
+                                Spacer()
+                                Text(snapshot.current?.series[name].map { ValueFormat.reading($0, metric: .memory, precision: 2) } ?? "—")
+                                    .monospacedDigit()
+                            }.font(.caption.weight(.medium))
+                            if samples.isEmpty {
+                                Text("暂无样本").font(.caption).foregroundStyle(.secondary).frame(height: 90)
+                            } else {
+                                Chart {
+                                    ForEach(samples) { point in
+                                        AreaMark(x: .value("时间", point.minute), yStart: .value("下限", scale.lowerBound), yEnd: .value("GB", point.value), series: .value("连续区间", point.segment))
+                                            .interpolationMethod(.monotone)
+                                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.24), color.opacity(0.01)], startPoint: .top, endPoint: .bottom))
+                                        LineMark(x: .value("时间", point.minute), y: .value("GB", point.value), series: .value("连续区间", point.segment))
+                                            .interpolationMethod(.monotone)
+                                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)).foregroundStyle(color)
+                                    }
+                                    if let latest = samples.last {
+                                        PointMark(x: .value("时间", latest.minute), y: .value("GB", latest.value)).symbolSize(20).foregroundStyle(color)
+                                    }
+                                }
+                                .chartXScale(domain: snapshot.plotStart(range)...0)
+                                .chartYScale(domain: scale)
+                                .chartXAxis(.hidden)
+                                .chartYAxis {
+                                    AxisMarks(position: .leading, values: [scale.lowerBound, scale.upperBound]) { value in
+                                        AxisGridLine()
+                                        AxisValueLabel {
+                                            if let number = value.as(Double.self) {
+                                                Text(number.formatted(.number.precision(.fractionLength(2))))
+                                            }
+                                        }
+                                    }
+                                }
+                                .frame(height: 90)
+                                .accessibilityLabel("\(name)内存趋势，当前\(snapshot.current?.series[name].map { ValueFormat.reading($0, metric: .memory, precision: 2) } ?? "暂无数据")，刻度\(scale.lowerBound.formatted(.number.precision(.fractionLength(2))))至\(scale.upperBound.formatted(.number.precision(.fractionLength(2)))) GB")
+                            }
+                        }.padding(12).modifier(ControlMaterial(cornerRadius: 16, reduce: reduce))
+                    }
+                }
+            }
+        }
     }
 }
 struct RangePicker: View {
@@ -451,7 +516,11 @@ struct Details: View {
                     facts
                     if model.metric == .cpu { cpuCores }
                     if model.metric == .gpu { gpuAcceleration }
-                    DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
+                    if model.metric == .memory {
+                        MemorySeriesCharts(snapshot: model.snapshot(.memory), range: model.range, reduce: model.reduceTransparency)
+                    } else {
+                        DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
+                    }
                     Divider()
                     comparison
                     Divider()

@@ -34,6 +34,16 @@ struct LinePoint: Identifiable {
     let value: Double
     let id: String
 }
+enum MemoryTrendScale {
+    static func domain(_ values: [Double]) -> ClosedRange<Double> {
+        let valid = values.filter { $0.isFinite && $0 >= 0 }
+        guard let minimum = valid.min(), let maximum = valid.max() else { return 0...0.01 }
+        let padding = max(0.01, (maximum - minimum) * 0.15)
+        let lower = max(0, floor((minimum - padding) * 100) / 100)
+        let upper = max(lower + 0.01, ceil((maximum + padding) * 100) / 100)
+        return lower...upper
+    }
+}
 struct MetricReading {
     let date: Date
     let value: Double?

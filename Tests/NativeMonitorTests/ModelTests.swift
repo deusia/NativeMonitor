@@ -224,4 +224,15 @@ final class ModelTests: XCTestCase {
         }
         XCTAssertNil(GPUCapabilities.coreCount(from: [:]))
     }
+    func testMemoryTrendScalesEachSeriesAndHandlesFlatValues() {
+        let high = MemoryTrendScale.domain([14.8, 15.0])
+        let low = MemoryTrendScale.domain([0.92, 1.03])
+        XCTAssertLessThan(high.lowerBound, 14.8); XCTAssertGreaterThan(high.upperBound, 15.0)
+        XCTAssertLessThan(low.lowerBound, 0.92); XCTAssertGreaterThan(low.upperBound, 1.03)
+        XCTAssertLessThan(low.upperBound - low.lowerBound, 1)
+        let flat = MemoryTrendScale.domain([1, 1])
+        XCTAssertLessThan(flat.lowerBound, 1); XCTAssertGreaterThan(flat.upperBound, 1)
+        XCTAssertEqual(MemoryTrendScale.domain([0, 0]).lowerBound, 0)
+        XCTAssertEqual(MemoryTrendScale.domain([.nan]), 0...0.01)
+    }
 }
