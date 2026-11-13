@@ -424,29 +424,13 @@ struct Details: View {
             .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.04))
             .navigationTitle("性能监控")
             .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
-                            columns = columns == .detailOnly ? .all : .detailOnly
-                        }
-                    } label: {
-                        Image(systemName: "sidebar.left").font(.system(size: 16)).frame(width: 36, height: 36)
-                            .background(Circle().strokeBorder(Color.primary.opacity(0.15)))
-                            .padding(4)
-                            .contentShape(Circle())
-                            .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
-                    }
-                    .controlSize(.large)
-                    .buttonStyle(.plain)
-                    .help(columns == .detailOnly ? "展开侧栏" : "收起侧栏")
-                    .accessibilityLabel(columns == .detailOnly ? "展开侧栏" : "收起侧栏")
-                    .accessibilityIdentifier("sidebarToggle")
-                    .keyboardShortcut("s", modifiers: [.command, .control])
-                }
                 if #available(macOS 26.0, *) {
+                    ToolbarItem(placement: .navigation) { sidebarToggle }
+                        .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .primaryAction) { toolbarActions }
                         .sharedBackgroundVisibility(.hidden)
                 } else {
+                    ToolbarItem(placement: .navigation) { sidebarToggle }
                     ToolbarItem(placement: .primaryAction) { toolbarActions }
                 }
             }
@@ -457,6 +441,25 @@ struct Details: View {
         .frame(minWidth: 640, minHeight: 520)
         .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, diagnostics: model.backdropDiagnostics))
         .onExitCommand(perform: close)
+    }
+
+    private var sidebarToggle: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                columns = columns == .detailOnly ? .all : .detailOnly
+            }
+        } label: {
+            Image(systemName: "sidebar.left").font(.system(size: 16)).frame(width: 36, height: 36)
+                .background(Circle().strokeBorder(Color.primary.opacity(0.15)))
+                .padding(4)
+                .contentShape(Circle())
+                .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
+        }
+        .buttonStyle(.plain)
+        .help(columns == .detailOnly ? "展开侧栏" : "收起侧栏")
+        .accessibilityLabel(columns == .detailOnly ? "展开侧栏" : "收起侧栏")
+        .accessibilityIdentifier("sidebarToggle")
+        .keyboardShortcut("s", modifiers: [.command, .control])
     }
 
     private var toolbarActions: some View {
