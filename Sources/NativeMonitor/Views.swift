@@ -692,7 +692,8 @@ struct Details: View {
                                 Text("平均 \(total.map { ValueFormat.number($0 / Double(cluster.indices.count), precision: 1) + "%" } ?? "—")")
                             }.font(.caption).monospacedDigit().foregroundStyle(.secondary)
                         }.padding(.vertical, 4)
-                    }.padding(12).modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
+                    }
+                    if cluster.id != clusters.last?.id { Divider() }
                 }
             } else if !cores.isEmpty {
                 Text("无法读取核心簇拓扑，显示全部逻辑核心。")
