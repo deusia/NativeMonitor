@@ -484,6 +484,9 @@ struct Details: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    if model.metric == .sensors {
+                        sensorPage
+                    } else {
                     hero
                     Trend(snapshot: model.snapshot(model.metric), range: model.range)
                         .frame(height: 180)
@@ -507,6 +510,7 @@ struct Details: View {
                             .font(.caption).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 5)
                     }.font(.caption).foregroundStyle(.primary)
+                    }
                 }.padding(28).frame(maxWidth: 1000, alignment: .leading).frame(maxWidth: .infinity)
             }
             // A different metric is a new detail page. Reset only its scroll subtree;
@@ -597,6 +601,27 @@ struct Details: View {
         }
     }
 
+    private var sensorPage: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Label("传感器", systemImage: "thermometer.medium").font(.system(size: 22, weight: .semibold))
+            Text(model.sensorStatus).font(.callout).foregroundStyle(.secondary)
+            ForEach(["°C", "rpm"], id: \.self) { unit in
+                let items = model.sensors.filter { $0.unit == unit }
+                if !items.isEmpty {
+                    Text(unit == "°C" ? "温度" : "风扇转速").font(.headline)
+                    ForEach(items) { sensor in
+                        HStack {
+                            Text(sensor.id)
+                            Spacer()
+                            Text("\(ValueFormat.number(sensor.value, precision: model.precision)) \(sensor.unit)").monospacedDigit()
+                        }.font(.callout)
+                    }
+                }
+            }
+            Text("数据来自 AppleSMC 私有接口，键名和可用项目因设备及系统版本而异；无风扇设备可能没有转速读数。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
     private var hero: some View {
         let snapshot = model.snapshot(model.metric)
         return VStack(alignment: .leading, spacing: 18) {
@@ -721,7 +746,7 @@ struct Details: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack { Text("趋势对照").font(.system(size: 13, weight: .medium)); Spacer(); Text("独立量纲 · 实时采样").font(.caption).foregroundStyle(.primary) }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8)], spacing: 8) {
-                ForEach(Metric.allCases) { metric in
+                ForEach(Metric.allCases.filter { $0 != .sensors }) { metric in
                     let snapshot = model.snapshot(metric)
                     Button { selectMetric(metric) } label: {
                         VStack(alignment: .leading, spacing: 9) {
