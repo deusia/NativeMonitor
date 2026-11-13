@@ -106,4 +106,26 @@ final class SystemReaderTests: XCTestCase {
             XCTAssertEqual(clusters.flatMap(\.indices).sorted(), Array(local.indices))
         }
     }
+    func testGPUCoreCountMatchesSystemProfiler() throws {
+        let capabilities = GPUCapabilities.detect()
+        guard let count = capabilities.coreCount, let name = capabilities.name else {
+            throw XCTSkip("驱动未提供可验证的 GPU 核心掩码")
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
+        process.arguments = ["SPDisplaysDataType", "-json"]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let devices = try XCTUnwrap(document["SPDisplaysDataType"] as? [[String: Any]])
+        guard let device = devices.first(where: { $0["sppci_model"] as? String == name }),
+              let reported = device["sppci_cores"] as? String, let officialCount = Int(reported) else {
+            throw XCTSkip("系统报告未提供可匹配的 GPU 核心数")
+        }
+        XCTAssertEqual(count, officialCount)
+    }
 }

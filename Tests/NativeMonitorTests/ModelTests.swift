@@ -218,11 +218,16 @@ final class ModelTests: XCTestCase {
         XCTAssertNil(gpu.usedMemory)
     }
     func testGPUCoreCountValidation() {
-        XCTAssertEqual(GPUCapabilities.coreCount(from: ["num_cores": 40]), 40)
-        for value: Any in [true, -1, 0, 1.5, Double.nan, 4097, "40"] {
-            XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": value]))
+        let config: [String: Any] = ["num_cores": 40, "num_mgpus": 4, "core_mask_list": [987, 987, 987, 987]]
+        XCTAssertEqual(GPUCapabilities.coreCount(from: config), 32)
+        XCTAssertEqual(GPUCapabilities.coreCount(from: ["num_cores": 8, "num_mgpus": 1, "core_mask_list": [255]]), 8)
+        XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 40]))
+        XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 40, "num_mgpus": 2, "core_mask_list": [255]]))
+        XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 4, "num_mgpus": 1, "core_mask_list": [255]]))
+        for value: Any in [true, -1, 1.5, Double.nan, "255"] {
+            XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 40, "num_mgpus": 1, "core_mask_list": [value]]))
         }
-        XCTAssertNil(GPUCapabilities.coreCount(from: [:]))
+        XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 40, "num_mgpus": 1, "core_mask_list": [0]]))
     }
     func testMemoryTrendScalesEachSeriesAndHandlesFlatValues() {
         let high = MemoryTrendScale.domain([14.8, 15.0])

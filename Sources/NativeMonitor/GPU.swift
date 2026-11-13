@@ -9,11 +9,21 @@ struct GPUCapabilities {
     let coreCount: Int?
 
     static func coreCount(from configuration: [String: Any]) -> Int? {
-        guard let number = configuration["num_cores"] as? NSNumber,
-              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
-        let value = number.doubleValue
-        guard value.isFinite, value >= 1, value <= 4096, value.rounded(.towardZero) == value else { return nil }
-        return number.intValue
+        func unsignedInteger(_ value: Any, maximum: Double) -> UInt64? {
+            guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            let value = number.doubleValue
+            guard value.isFinite, value >= 0, value <= maximum, value.rounded(.towardZero) == value else { return nil }
+            return number.uint64Value
+        }
+        guard let capacity = configuration["num_cores"].flatMap({ unsignedInteger($0, maximum: 4096) }), capacity > 0,
+              let groups = configuration["num_mgpus"].flatMap({ unsignedInteger($0, maximum: 4096) }), groups > 0,
+              let masks = configuration["core_mask_list"] as? [Any], masks.count == Int(groups) else { return nil }
+        let values = masks.compactMap { unsignedInteger($0, maximum: 9_007_199_254_740_991) }
+        guard values.count == masks.count else { return nil }
+        // num_cores 与本机系统报告不一致；仅在掩码完整时推算启用核心数。
+        let active = values.reduce(0) { $0 + $1.nonzeroBitCount }
+        guard active > 0, active <= capacity else { return nil }
+        return active
     }
     static func detect() -> GPUCapabilities {
         let device = MTLCreateSystemDefaultDevice()

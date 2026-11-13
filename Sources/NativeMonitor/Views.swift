@@ -735,7 +735,7 @@ struct Details: View {
                     .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
             }.font(.caption)
             HStack {
-                Text("GPU 核心数（驱动）")
+                Text("GPU 核心数（驱动掩码）")
                 Spacer()
                 Text(capabilities.coreCount.map { "\($0)" } ?? "—").monospacedDigit()
                 Text("· 光线追踪")
