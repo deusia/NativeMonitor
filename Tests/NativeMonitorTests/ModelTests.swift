@@ -171,4 +171,50 @@ final class ModelTests: XCTestCase {
         XCTAssertTrue(snapshot.samples(.short).isEmpty)
         XCTAssertNil(snapshot.value)
     }
+    @MainActor func testSettingsPersistAndValidate() {
+        let suite = "NativeMonitorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = MonitorModel(defaults: defaults)
+        first.interval = 5; first.cpuScale = .average; first.precision = 2
+        first.theme = .dark; first.reduceTransparency = true; first.range = .long
+        let restored = MonitorModel(defaults: defaults)
+        XCTAssertEqual(restored.interval, 5); XCTAssertEqual(restored.cpuScale, .average)
+        XCTAssertEqual(restored.precision, 2); XCTAssertEqual(restored.theme, .dark)
+        XCTAssertTrue(restored.reduceTransparency); XCTAssertEqual(restored.range, .long)
+        defaults.set(99, forKey: "samplingInterval"); defaults.set(-1, forKey: "precision")
+        XCTAssertEqual(MonitorModel(defaults: defaults).interval, 2)
+        XCTAssertEqual(MonitorModel(defaults: defaults).precision, 1)
+    }
+    func testCPUScaleAndAdaptiveUnits() {
+        let date = Date()
+        let reading = MetricReading(date: date, value: 150, status: "", facts: [], rows: [], cores: [50, 100], cpuParts: [100, 50, 50])
+        let total = Snapshot(metric: .cpu, current: reading, history: [TimedValue(date: date, value: 150)], now: date)
+        let average = Snapshot(metric: .cpu, current: reading, history: [TimedValue(date: date, value: 150)], now: date, cpuScale: .average)
+        XCTAssertEqual(total.value, 150); XCTAssertEqual(total.maximum, 200)
+        let eighteen = MetricReading(date: date, value: 1800, status: "", facts: [], rows: [], cores: Array(repeating: 100, count: 18))
+        XCTAssertEqual(Snapshot(metric: .cpu, current: eighteen).maximum, 1800)
+        XCTAssertEqual(average.value, 75); XCTAssertEqual(average.maximum, 100)
+        XCTAssertEqual(average.status, "整机平均使用率")
+        XCTAssertEqual(average.samples(.short).first?.value, 75)
+        XCTAssertEqual(ValueFormat.rate(0.01, precision: 1), "<0.1 B/s")
+        XCTAssertEqual(ValueFormat.rate(0, precision: 1), "0 B/s")
+        XCTAssertEqual(ValueFormat.rate(250, precision: 1), "250 B/s")
+        XCTAssertEqual(ValueFormat.rate(1250, precision: 1), "1.2 KB/s")
+        XCTAssertEqual(ValueFormat.rate(1_250_000, precision: 2), "1.25 MB/s")
+    }
+    func testSeriesGapsAndGPUOptionalMetrics() throws {
+        let start = Date(timeIntervalSince1970: 1000)
+        let reading = MetricReading(date: start, value: 30, status: "", facts: [], rows: [])
+        let history = [TimedValue(date: start, value: 10, series: ["设备": 10, "渲染器": 5]),
+                       TimedValue(date: start.addingTimeInterval(1), value: 20, series: ["设备": 20]),
+                       TimedValue(date: start.addingTimeInterval(2), value: 30, series: ["设备": 30, "渲染器": 8])]
+        let snapshot = Snapshot(metric: .gpu, current: reading, history: history, now: start.addingTimeInterval(2))
+        let renderer = snapshot.seriesSamples(.short).filter { $0.name == "渲染器" }
+        XCTAssertEqual(renderer.count, 2)
+        XCTAssertNotEqual(renderer[0].segment, renderer[1].segment)
+        let gpu = try GPUReading.parse(["Device Utilization %": 50, "Alloc system memory": 1024, "In use system memory": true], driver: "AGX")
+        XCTAssertEqual(gpu.allocatedMemory, 1024)
+        XCTAssertNil(gpu.usedMemory)
+    }
 }

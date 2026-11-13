@@ -39,6 +39,25 @@ struct MemoryReading {
 struct VolumeReading { let total: UInt64; let available: UInt64 }
 struct InterfaceCounters { let name: String; let counters: Counters }
 
+enum CoreTopology {
+    // 性能等级只有数量信息时，数量相同的类别不能安全映射到具体核心。
+    static func match(types: [Int: String], levels: [(name: String, count: Int)], count: Int) -> [String]? {
+        guard count > 0, types.count == count, (0..<count).allSatisfy({ types[$0] != nil }) else { return nil }
+        let groups = Dictionary(grouping: types.keys, by: { types[$0]! })
+        let groupCounts = groups.values.map(\.count)
+        guard groups.count == levels.count, Set(levels.map(\.count)).count == levels.count,
+              Set(groupCounts).count == groups.count, Set(groupCounts) == Set(levels.map(\.count)) else { return nil }
+        var result = Array(repeating: "", count: count)
+        for (_, indices) in groups {
+            guard let level = levels.first(where: { $0.count == indices.count }) else { return nil }
+            let name: String
+            switch level.name { case "Super": name = "超能核"; case "Performance": name = "性能核"; case "Efficiency": name = "能效核"; default: return nil }
+            for index in indices { result[index] = name }
+        }
+        return result.allSatisfy { !$0.isEmpty } ? result : nil
+    }
+}
+
 struct SystemReader {
     static func cpu() -> CPUCounters? {
         var info = host_cpu_load_info()
@@ -50,6 +69,47 @@ struct SystemReader {
         }
         guard result == KERN_SUCCESS else { return nil }
         return CPUCounters(user: UInt64(info.cpu_ticks.0), system: UInt64(info.cpu_ticks.1), idle: UInt64(info.cpu_ticks.2), nice: UInt64(info.cpu_ticks.3))
+    }
+    static func cpuCores() -> [CPUCounters]? {
+        var processorCount: natural_t = 0
+        var info: processor_info_array_t?
+        var count: mach_msg_type_number_t = 0
+        guard host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &processorCount, &info, &count) == KERN_SUCCESS,
+              let info else { return nil }
+        defer { vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(count) * vm_size_t(MemoryLayout<integer_t>.size)) }
+        guard processorCount > 0, Int(count) >= Int(processorCount) * Int(CPU_STATE_MAX) else { return nil }
+        return (0..<Int(processorCount)).map { index in
+            let ticks = info.advanced(by: index * Int(CPU_STATE_MAX))
+            return CPUCounters(user: UInt64(UInt32(bitPattern: ticks[Int(CPU_STATE_USER)])),
+                               system: UInt64(UInt32(bitPattern: ticks[Int(CPU_STATE_SYSTEM)])),
+                               idle: UInt64(UInt32(bitPattern: ticks[Int(CPU_STATE_IDLE)])),
+                               nice: UInt64(UInt32(bitPattern: ticks[Int(CPU_STATE_NICE)])))
+        }
+    }
+    static func coreLabels(count: Int) -> [String]? {
+        let root = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/cpus")
+        guard root != 0 else { return nil }
+        defer { IOObjectRelease(root) }
+        var iterator: io_iterator_t = 0
+        guard IORegistryEntryGetChildIterator(root, kIODeviceTreePlane, &iterator) == KERN_SUCCESS else { return nil }
+        defer { IOObjectRelease(iterator) }
+        var types: [Int: String] = [:]
+        while case let child = IOIteratorNext(iterator), child != 0 {
+            defer { IOObjectRelease(child) }
+            guard let id = IORegistryEntryCreateCFProperty(child, "logical-cpu-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber,
+                  let data = IORegistryEntryCreateCFProperty(child, "cluster-type" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data,
+                  let type = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .controlCharacters), !type.isEmpty else { continue }
+            types[id.intValue] = type
+        }
+        var levels: [(name: String, count: Int)] = []
+        for level in 0..<8 {
+            var nameBuffer = [CChar](repeating: 0, count: 128), nameSize = nameBuffer.count
+            var cpuCount: Int32 = 0, size = MemoryLayout<Int32>.size
+            guard sysctlbyname("hw.perflevel\(level).name", &nameBuffer, &nameSize, nil, 0) == 0,
+                  sysctlbyname("hw.perflevel\(level).logicalcpu", &cpuCount, &size, nil, 0) == 0 else { break }
+            levels.append((String(cString: nameBuffer), Int(cpuCount)))
+        }
+        return CoreTopology.match(types: types, levels: levels, count: count)
     }
     static func memory() -> MemoryReading? {
         var info = vm_statistics64()

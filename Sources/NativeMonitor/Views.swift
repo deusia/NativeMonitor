@@ -74,7 +74,7 @@ struct ControlMaterial: ViewModifier {
         }
     }
 }
-struct DemoControls: View {
+struct MonitorSettings: View {
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @ObservedObject var model: MonitorModel
     var body: some View {
@@ -99,6 +99,17 @@ struct DemoControls: View {
                 .accessibilityLabel("外观").accessibilityValue(model.theme.rawValue)
                 .accessibilityIdentifier("themePicker")
             }
+            Picker("采样间隔", selection: $model.interval) {
+                Text("1 秒").tag(1); Text("2 秒").tag(2); Text("5 秒").tag(5)
+            }
+            Picker("CPU 口径", selection: $model.cpuScale) {
+                ForEach(CPUScale.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Picker("主读数小数位", selection: $model.precision) {
+                Text("最多 0 位").tag(0); Text("最多 1 位").tag(1); Text("最多 2 位").tag(2)
+            }
+            Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
             if !model.reduceTransparency && !systemReduce {
                 BackdropStatus(diagnostics: model.backdropDiagnostics)
@@ -148,7 +159,7 @@ struct Trend: View {
                             AxisGridLine().foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.22) : Color.secondary.opacity(0.15))
                             AxisValueLabel {
                                 if let number = value.as(Double.self) {
-                                    Text("\(number.formatted()) \(snapshot.metric.unit)").foregroundStyle(.primary)
+                                    Text(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)).foregroundStyle(.primary)
                                 }
                             }
                         }
@@ -175,6 +186,62 @@ struct Trend: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: samples)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.rawValue) 分钟，\(snapshot.missingReason ?? snapshot.reading)，\(snapshot.sourceLabel)")
+    }
+}
+struct DetailSeriesChart: View {
+    let snapshot: Snapshot
+    let range: HistoryRange
+    private let colors: [String: Color] = ["用户": .blue, "系统": .orange, "设备": .blue,
+        "渲染器": .purple, "分块器": .orange, "活跃": .blue, "不可换出": .orange,
+        "压缩": .purple, "非活跃": .teal, "空闲": .green, "读取": .blue, "写入": .orange, "接收": .blue, "发送": .orange]
+    var body: some View {
+        let points = snapshot.seriesSamples(range)
+        let names = Array(Set(points.map(\.name))).sorted()
+        VStack(alignment: .leading, spacing: 12) {
+            Label("分项趋势", systemImage: "chart.xyaxis.line").font(.headline)
+            if points.isEmpty {
+                Text(snapshot.missingReason ?? "等待分项样本").foregroundStyle(.secondary).frame(height: 80)
+            } else {
+                Chart {
+                    ForEach(points) { point in
+                        let color = colors[point.name] ?? .gray
+                        AreaMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment), stacking: .unstacked)
+                            .interpolationMethod(.monotone)
+                            .foregroundStyle(LinearGradient(colors: [color.opacity(snapshot.metric == .memory ? 0.10 : 0.18), color.opacity(0.01)], startPoint: .top, endPoint: .bottom))
+                        LineMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment))
+                            .interpolationMethod(.monotone)
+                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                            .foregroundStyle(color)
+                    }
+                    ForEach(names, id: \.self) { name in
+                        if let latest = points.last(where: { $0.name == name }) {
+                            PointMark(x: .value("时间", latest.minute), y: .value(snapshot.metric.unit, latest.value))
+                                .symbolSize(22).foregroundStyle(colors[name] ?? .gray)
+                        }
+                    }
+                }
+                .chartXScale(domain: snapshot.plotStart(range)...0)
+                .chartYScale(domain: 0...snapshot.maximum)
+                .chartXAxis(.hidden)
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: [0, snapshot.maximum / 2, snapshot.maximum]) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let number = value.as(Double.self) { Text(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)) }
+                        }
+                    }
+                }
+                .frame(height: 180)
+                .accessibilityLabel("\(snapshot.metric.rawValue)分项趋势，包含\(names.joined(separator: "、"))")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), alignment: .leading)], alignment: .leading, spacing: 8) {
+                    ForEach(names, id: \.self) { name in
+                        Label(name, systemImage: "circle.fill")
+                            .labelStyle(.titleAndIcon)
+                            .foregroundStyle(colors[name] ?? .gray)
+                    }
+                }.font(.caption)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 struct RangePicker: View {
@@ -246,7 +313,7 @@ struct Overview: View {
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
                     .accessibilityLabel("概览设置")
                     .popover(isPresented: $showSettings) {
-                        DemoControls(model: model).padding(14).frame(width: 350)
+                        MonitorSettings(model: model).padding(14).frame(width: 350)
                     }
                 Button(action: close) { Image(systemName: "xmark") }
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
@@ -284,7 +351,7 @@ struct Overview: View {
                     Text(snapshot.number).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
                         .contentTransition(.numericText(value: snapshot.value ?? 0))
                         .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)
-                    if snapshot.value != nil { Text(metric.unit).font(.caption) }
+                    if snapshot.value != nil { Text(snapshot.unit).font(.caption) }
                     Spacer(minLength: 0)
                 }
                 Text(snapshot.status).font(.system(size: 11)).lineLimit(2)
@@ -382,6 +449,8 @@ struct Details: View {
                     Trend(snapshot: model.snapshot(model.metric), range: model.range)
                         .frame(height: 180)
                     facts
+                    if model.metric == .cpu { cpuCores }
+                    DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
                     Divider()
                     comparison
                     Divider()
@@ -457,12 +526,12 @@ struct Details: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("外观设置").accessibilityLabel("设置")
+            .help("监控设置").accessibilityLabel("设置")
             .popover(isPresented: $showSettings) {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack { Text("设置").font(.headline); Spacer(); Button("完成") { showSettings = false }.modifier(GlassButton(reduce: model.reduceTransparency)) }
-                    DemoControls(model: model)
-                    Text("只改变应用外观，不修改系统设置。").font(.caption).foregroundStyle(.primary)
+                    MonitorSettings(model: model)
+                    Text("设置只影响本应用。").font(.caption).foregroundStyle(.primary)
                 }.padding(18).frame(width: 350)
             }
         }
@@ -488,7 +557,7 @@ struct Details: View {
         let snapshot = model.snapshot(model.metric)
         return VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center) {
-                Text(model.metric.rawValue).font(.system(size: 22, weight: .semibold))
+                Label(model.metric.rawValue, systemImage: model.metric.symbol).font(.system(size: 22, weight: .semibold))
                 Spacer(minLength: 12)
                 RangePicker(model: model)
             }
@@ -498,7 +567,7 @@ struct Details: View {
                         .id(model.metric)
                         .contentTransition(.numericText(value: snapshot.value ?? 0))
                         .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)
-                    if snapshot.value != nil { Text(model.metric.unit).font(.title3).foregroundStyle(.primary) }
+                    if snapshot.value != nil { Text(snapshot.unit).font(.title3).foregroundStyle(.primary) }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 5) {
@@ -510,12 +579,36 @@ struct Details: View {
         }
     }
     private var facts: some View {
-        HStack(alignment: .top, spacing: 16) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], alignment: .leading, spacing: 10) {
             ForEach(model.snapshot(model.metric).facts) { fact in
                 VStack(alignment: .leading, spacing: 7) {
                     Text(fact.label).font(.caption).foregroundStyle(.primary)
                     Text(fact.value).font(.system(size: 17, weight: .medium)).monospacedDigit()
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(12).frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                    .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
+            }
+        }
+    }
+    private var cpuCores: some View {
+        let cores = model.snapshot(.cpu).current?.cores ?? []
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("逻辑核心", systemImage: "square.grid.3x3.fill").font(.headline)
+            if cores.isEmpty { Text("等待核心采样").foregroundStyle(.secondary) }
+            if model.coreLabels != nil {
+                Text("类型根据系统拓扑和核心数量推断，颜色用于区分核心类别。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
+                ForEach(Array(cores.enumerated()), id: \.offset) { index, value in
+                    let kind = model.coreLabels.flatMap { index < $0.count ? $0[index] : nil }
+                    let color: Color = kind == "超能核" ? Color(red: 0.78, green: 0.47, blue: 0.98) : kind == "性能核" ? Color(red: 0.48, green: 0.32, blue: 0.9) : kind == "能效核" ? .teal : metricColor
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack { Text("\(kind ?? "核心") \(index + 1)"); Spacer(); Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit() }
+                        ProgressView(value: value ?? 0, total: 100).tint(color)
+                    }.font(.caption).padding(10).modifier(ControlMaterial(reduce: model.reduceTransparency))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
+                }
             }
         }
     }
