@@ -74,43 +74,52 @@ struct ControlMaterial: ViewModifier {
         }
     }
 }
+private struct SettingsMenu<Value: Hashable>: View {
+    let title: String
+    @Binding var selection: Value
+    let options: [(Value, String)]
+    let reduce: Bool
+    private var selectedLabel: String { options.first { $0.0 == selection }?.1 ?? "—" }
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Menu {
+                ForEach(options.indices, id: \.self) { index in
+                    let option = options[index]
+                    Button { selection = option.0 } label: {
+                        if selection == option.0 { Label(option.1, systemImage: "checkmark") }
+                        else { Text(option.1) }
+                    }
+                }
+            } label: {
+                HStack { Text(selectedLabel); Spacer(minLength: 8); Image(systemName: "chevron.down") }
+                    .padding(.horizontal, 12).frame(width: 170, height: 30)
+                    .contentShape(Rectangle())
+                    .modifier(ControlMaterial(cornerRadius: 15, reduce: reduce))
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+            .accessibilityLabel(title).accessibilityValue(selectedLabel)
+        }
+    }
+}
 struct MonitorSettings: View {
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @ObservedObject var model: MonitorModel
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("外观")
-                Spacer()
-                Menu {
-                    ForEach(Theme.allCases) { theme in
-                        Button { model.theme = theme } label: {
-                            if model.theme == theme { Label(theme.rawValue, systemImage: "checkmark") }
-                            else { Text(theme.rawValue) }
-                        }
-                    }
-                } label: {
-                    HStack { Text(model.theme.rawValue); Spacer(minLength: 8); Image(systemName: "chevron.down") }
-                        .padding(.horizontal, 12).frame(width: 170, height: 30)
-                        .contentShape(Rectangle())
-                        .modifier(ControlMaterial(cornerRadius: 15, reduce: model.reduceTransparency))
-                }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-                .accessibilityLabel("外观").accessibilityValue(model.theme.rawValue)
+            SettingsMenu(title: "外观", selection: $model.theme,
+                         options: Theme.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
                 .accessibilityIdentifier("themePicker")
-            }
-            Picker("历史范围", selection: $model.range) {
-                ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
-            }
-            Picker("采样间隔", selection: $model.interval) {
-                Text("1 秒").tag(1); Text("2 秒").tag(2); Text("5 秒").tag(5)
-            }
-            Picker("CPU 口径", selection: $model.cpuScale) {
-                ForEach(CPUScale.allCases) { Text($0.rawValue).tag($0) }
-            }
-            Picker("主读数小数位", selection: $model.precision) {
-                Text("最多 0 位").tag(0); Text("最多 1 位").tag(1); Text("最多 2 位").tag(2)
-            }
+            SettingsMenu(title: "历史范围", selection: $model.range,
+                         options: HistoryRange.allCases.map { ($0, $0.label) }, reduce: model.reduceTransparency)
+            SettingsMenu(title: "采样间隔", selection: $model.interval,
+                         options: [1, 2, 5].map { ($0, "\($0) 秒") }, reduce: model.reduceTransparency)
+            SettingsMenu(title: "CPU 口径", selection: $model.cpuScale,
+                         options: CPUScale.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+            SettingsMenu(title: "主读数小数位", selection: $model.precision,
+                         options: [0, 1, 2].map { ($0, "最多 \($0) 位") }, reduce: model.reduceTransparency)
             Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
