@@ -321,6 +321,7 @@ struct RangePicker: View {
         HStack(spacing: 8) {
             if !quickRanges.contains(model.range) {
                 Text(model.range.label).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
                     .accessibilityLabel("当前历史范围：\(model.range.label)")
             }
             Group {
@@ -423,11 +424,7 @@ struct Overview: View {
         let snapshot = model.snapshot(metric)
         return Button { open(metric) } label: {
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Label(metric.rawValue, systemImage: metric.symbol).font(.system(size: 12, weight: .medium))
-                    Spacer()
-                    Text("实时").font(.system(size: 10))
-                }
+                Label(metric.rawValue, systemImage: metric.symbol).font(.system(size: 12, weight: .medium))
                 HStack(alignment: .firstTextBaseline) {
                     Text(snapshot.number).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
                         .contentTransition(.numericText(value: snapshot.value ?? 0))
