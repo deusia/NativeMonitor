@@ -20,9 +20,9 @@ enum Theme: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 enum HistoryRange: Int, CaseIterable, Identifiable {
-    case short = 5, long = 30
+    case short = 5, long = 30, hour = 60, sixHours = 360, day = 1440
     var id: Int { rawValue }
-    var label: String { "\(rawValue) 分钟" }
+    var label: String { rawValue < 60 ? "\(rawValue) 分钟" : "\(rawValue / 60) 小时" }
 }
 struct Sample: Identifiable, Equatable { let id: Double; let minute: Double; let value: Double }
 struct Fact: Identifiable { let label: String; let value: String; var id: String { label } }
@@ -94,10 +94,10 @@ struct Snapshot {
         }
         return result
     }
-    var maximum: Double {
+    func maximum(_ range: HistoryRange) -> Double {
         if metric == .cpu { return Double(max(current?.cores.count ?? 0, 1)) * 100 * cpuFactor }
         if metric == .gpu { return 100 }
-        return max(0.001, max(samples(.long).map(\.value).max() ?? 0, seriesSamples(.long).map(\.value).max() ?? 0, value ?? 0) * 1.2)
+        return max(0.001, max(samples(range).map(\.value).max() ?? 0, seriesSamples(range).map(\.value).max() ?? 0, value ?? 0) * 1.2)
     }
     var note: String {
         switch metric {
@@ -241,7 +241,7 @@ struct Snapshot {
         }
         readings[metric] = reading
         if let value = reading.value {
-            histories[metric, default: []].removeAll { now.timeIntervalSince($0.date) > 1800 }
+            histories[metric, default: []].removeAll { now.timeIntervalSince($0.date) > Double(HistoryRange.day.rawValue * 60) }
             histories[metric, default: []].append(TimedValue(date: reading.date, value: value, series: reading.series))
         } else { histories[metric] = [] }
     }
