@@ -13,6 +13,10 @@
 - 使用 Metal TensorOps 矩阵乘法测试负载重新录制，测试程序成功返回，Instruments 的 Metal Encoder Hierarchy 中也出现该进程；选择 `Performance Limiters` 后仍报告 `Cannot find GPU device for counter values`，未获得目标计数器。无法确定失败是否与权限、驱动或工具版本有关。
 - 后续用 Instruments 保存启用 `Performance Limiters` 的自定义模板，再以 `xctrace --launch` 单独启动 TensorOps 矩阵测试。导出的 `gpu-counter-info` 包含 88 项，其中 `Neural Accelerator Utilization` 的编号为 49；`gpu-counter-value` 的前 100 万行中该指标先为零，随后出现约 6.25% 的非零样本。编号来自本次录制的元数据，不应假定其他机器或录制相同。该结果证明这次单进程跟踪能够取得数值，不证明已找到全系统持续采集接口。
 - 该次单进程录制持续约 4.3 秒，生成约 1.4 GB 跟踪文件；导出计数器时观察到 `xctrace` 的常驻内存约 4.2 GiB。为控制开销，在读取前 100 万行后中止导出；此前录制进行中直接导出也失败。因此不能将这种录制和导出方案直接用于常驻实时监控。
+- 2026-11-14 新建仅包含 Metal Application 且启用 `Performance Limiters` 的精简模板，限制短时滚动窗口：一次 4 秒单进程跟踪生成约 116 MB，导出前 100 万行用时约 25 秒，并读到约 6.52% 的非零 Neural Accelerator 样本；录制中导出仍报 `Document Missing Template Error`。另一次 3 秒限时录制及处理历时约 16 秒，`xctrace` 峰值约 807% CPU、7.3 GiB 常驻内存，生成约 134 MB 文件。这些是本机单次观察，不能作为其他设备的资源消耗保证。
+- 同一精简模板以全进程模式采集并运行 TensorOps 测试，跟踪文件约 121 MB；从已完成的跟踪导出约 126 万行后找到非零目标样本，最大约 6.32%。因此本机的全进程录制也能提供目标计数器，但仍没有验证低开销或录制中读取方式。
+- 以普通用户直接探测 Xcode 私有的 `DTGPUDataSource`，可发现 13 和 14 号计数器组，但报告 `Fail to instantiate AGXGPURawCounterSourceGroup`；尝试配置 13 号组并启动采集时返回失败，未收到回调。具体原因尚未确定，不能据此断言只是权限问题；该私有接口还依赖 Xcode，不能直接作为应用的稳定依赖。
+- 枚举本机 IOReport 可见的通道名称，未发现名称包含 `Neural`、`MXU`、`tensor` 或 `matrix` 的通道；名称枚举不能排除隐藏通道，也不代表系统不存在其他数据源。
 - 系统信息可识别 32 核 M5 Max GPU，驱动为 `com.apple.AGXG17X`。本机 `DevToolsSecurity -status` 显示关闭；该设置涉及 Apple 签名调试与性能分析工具的额外密码提示，不能据此认定采集失败是权限问题。Apple 的 [Xcode 系统要求](https://developer.apple.com/xcode/system-requirements)显示 Xcode 27.2 支持在 macOS 26.6 或更新版本运行，但不代表已验证当前系统构建的每项性能计数器。
 - 录制进行时尝试 `xctrace export --toc` 返回 `Document Missing Template Error`。短时全系统跟踪会产生较大的临时文件和处理开销，因此本次没有找到可直接用作菜单栏秒级数据源的可靠路径。不能由这一实验断言其他版本的 Instruments 无法实时显示计数器。
 
