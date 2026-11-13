@@ -92,26 +92,15 @@ struct SystemReader {
             // 限定 en 前缀，避免将常见 VPN 和桥接接口与底层接口重复计数。
             if name.hasPrefix("en") { names[if_nametoindex(name)] = name }
         }
-        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
-        var size = 0
-        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return nil }
-        let buffer = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: MemoryLayout<if_msghdr2>.alignment)
-        defer { buffer.deallocate() }
-        guard sysctl(&mib, u_int(mib.count), buffer, &size, nil, 0) == 0 else { return nil }
-        var result: [InterfaceCounters] = [], offset = 0
-        while offset + 4 <= size {
-            let message = buffer.advanced(by: offset)
-            let length = Int(message.loadUnaligned(as: UInt16.self))
-            guard length >= 4, offset + length <= size else { return nil }
-            if message.load(fromByteOffset: 3, as: UInt8.self) == RTM_IFINFO2, length >= MemoryLayout<if_msghdr2>.size {
-                let info = buffer.advanced(by: offset).loadUnaligned(as: if_msghdr2.self)
-                if let name = names[UInt32(info.ifm_index)] {
-                    result.append(InterfaceCounters(name: name, counters: Counters(first: info.ifm_data.ifi_ibytes, second: info.ifm_data.ifi_obytes)))
-                }
-            }
-            offset += length
+        var result: [InterfaceCounters] = []
+        for (index, name) in names {
+            var mib: [Int32] = [CTL_NET, PF_LINK, NETLINK_GENERIC, IFMIB_IFDATA, Int32(index), IFDATA_GENERAL]
+            var data = ifmibdata()
+            var size = MemoryLayout<ifmibdata>.size
+            // NET_RT_IFLIST2 在部分系统对普通进程截断计数器，IFDATA_GENERAL 返回完整值。
+            guard sysctl(&mib, u_int(mib.count), &data, &size, nil, 0) == 0, size == MemoryLayout<ifmibdata>.size else { return nil }
+            result.append(InterfaceCounters(name: name, counters: Counters(first: data.ifmd_data.ifi_ibytes, second: data.ifmd_data.ifi_obytes)))
         }
-        guard result.count == names.count else { return nil }
         return result.sorted { $0.name < $1.name }
     }
     static func disk() -> Counters? {

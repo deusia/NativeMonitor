@@ -49,4 +49,32 @@ final class SystemReaderTests: XCTestCase {
         }
         XCTAssertFalse(MonitorCollector.readGPU().status.isEmpty)
     }
+    func testNetworkCountersMatchNetstatWithoutTruncation() throws {
+        let before = try XCTUnwrap(SystemReader.network())
+        guard let candidate = before.first(where: { $0.counters.first > 0 || $0.counters.second > 0 }) else {
+            throw XCTSkip("没有可用于对照的活动网络接口")
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/netstat")
+        process.arguments = ["-ibn"]
+        process.environment = ["LC_ALL": "C"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try process.run()
+        let output = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        let line = try XCTUnwrap(String(data: output, encoding: .utf8)?.split(separator: "\n").first {
+            let fields = $0.split(whereSeparator: \.isWhitespace)
+            return fields.count >= 10 && fields[0] == Substring(candidate.name) && fields[2].hasPrefix("<Link#")
+        })
+        let fields = line.split(whereSeparator: \.isWhitespace)
+        let received = try XCTUnwrap(UInt64(fields[fields.count - 5]))
+        let sent = try XCTUnwrap(UInt64(fields[fields.count - 2]))
+        let after = try XCTUnwrap(SystemReader.network()?.first(where: { $0.name == candidate.name }))
+        XCTAssertGreaterThanOrEqual(received, candidate.counters.first)
+        XCTAssertLessThanOrEqual(received, after.counters.first)
+        XCTAssertGreaterThanOrEqual(sent, candidate.counters.second)
+        XCTAssertLessThanOrEqual(sent, after.counters.second)
+    }
 }
