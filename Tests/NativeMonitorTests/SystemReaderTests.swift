@@ -46,7 +46,11 @@ final class SystemReaderTests: XCTestCase {
         XCTAssertTrue(cores.allSatisfy { $0.map { (0...100).contains($0) } ?? false })
         XCTAssertEqual(cpu, cores.compactMap { $0 }.reduce(0, +), accuracy: 0.001)
         XCTAssertLessThanOrEqual(cpu, Double(cores.count) * 100)
-        XCTAssertGreaterThan(try XCTUnwrap(second[.memory]?.value), 0)
+        let memory = try XCTUnwrap(second[.memory])
+        XCTAssertGreaterThan(try XCTUnwrap(memory.value), 0)
+        XCTAssertEqual(Set(memory.series.keys), Set(["活跃", "非活跃", "不可换出", "压缩", "空闲"]))
+        XCTAssertTrue(memory.series.values.allSatisfy { $0.isFinite && $0 >= 0 })
+        XCTAssertEqual(try XCTUnwrap(memory.value), try XCTUnwrap(memory.series["活跃"]) + XCTUnwrap(memory.series["不可换出"]) + XCTUnwrap(memory.series["压缩"]), accuracy: 0.000001)
         XCTAssertGreaterThanOrEqual(try XCTUnwrap(second[.disk]?.value), 0)
         if let interfaces = SystemReader.network(), !interfaces.isEmpty {
             XCTAssertGreaterThanOrEqual(try XCTUnwrap(second[.network]?.value), 0)

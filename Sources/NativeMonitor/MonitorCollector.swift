@@ -32,7 +32,7 @@ final class MonitorCollector: @unchecked Sendable {
         if let memory = SystemReader.memory() {
             result[.memory] = MetricReading(date: date, value: Double(memory.used) / 1e9, status: "活跃 + 不可换出 + 压缩", facts: [
                 Fact(label: "物理内存", value: Self.bytes(memory.total)), Fact(label: "压缩", value: Self.bytes(memory.compressed)), Fact(label: "交换已用", value: Self.bytes(memory.swapUsed))
-            ], rows: [Fact(label: "活跃", value: Self.bytes(memory.active)), Fact(label: "不可换出", value: Self.bytes(memory.wired)), Fact(label: "非活跃页", value: Self.bytes(memory.inactive)), Fact(label: "空闲页", value: Self.bytes(memory.free)), Fact(label: "已用比例", value: Self.text(Double(memory.used) / Double(memory.total) * 100, suffix: "%"))], series: ["活跃": Double(memory.active) / 1e9, "不可换出": Double(memory.wired) / 1e9, "压缩": Double(memory.compressed) / 1e9])
+            ], rows: [Fact(label: "活跃", value: Self.bytes(memory.active)), Fact(label: "不可换出", value: Self.bytes(memory.wired)), Fact(label: "非活跃页", value: Self.bytes(memory.inactive)), Fact(label: "空闲页", value: Self.bytes(memory.free)), Fact(label: "已用比例", value: Self.text(Double(memory.used) / Double(memory.total) * 100, suffix: "%"))], series: ["活跃": Double(memory.active) / 1e9, "非活跃": Double(memory.inactive) / 1e9, "不可换出": Double(memory.wired) / 1e9, "压缩": Double(memory.compressed) / 1e9, "空闲": Double(memory.free) / 1e9])
         } else { result[.memory] = Self.unavailable(date, "内存数据不可用") }
         let disk = SystemReader.disk()
         let diskRates = disk.flatMap { current in previousDisk.flatMap { current.rates(since: $0.1, seconds: uptime - $0.0) } }

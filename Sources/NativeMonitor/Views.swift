@@ -193,7 +193,7 @@ struct DetailSeriesChart: View {
     let range: HistoryRange
     private let colors: [String: Color] = ["用户": .blue, "系统": .orange, "设备": .blue,
         "渲染器": .purple, "分块器": .orange, "活跃": .blue, "不可换出": .orange,
-        "压缩": .purple, "读取": .blue, "写入": .orange, "接收": .blue, "发送": .orange]
+        "压缩": .purple, "非活跃": .teal, "空闲": .green, "读取": .blue, "写入": .orange, "接收": .blue, "发送": .orange]
     var body: some View {
         let points = snapshot.seriesSamples(range)
         let names = Array(Set(points.map(\.name))).sorted()
@@ -207,7 +207,7 @@ struct DetailSeriesChart: View {
                         let color = colors[point.name] ?? .gray
                         AreaMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment), stacking: .unstacked)
                             .interpolationMethod(.monotone)
-                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.18), color.opacity(0.01)], startPoint: .top, endPoint: .bottom))
+                            .foregroundStyle(LinearGradient(colors: [color.opacity(snapshot.metric == .memory ? 0.10 : 0.18), color.opacity(0.01)], startPoint: .top, endPoint: .bottom))
                         LineMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment))
                             .interpolationMethod(.monotone)
                             .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
@@ -233,7 +233,7 @@ struct DetailSeriesChart: View {
                 }
                 .frame(height: 180)
                 .accessibilityLabel("\(snapshot.metric.rawValue)分项趋势，包含\(names.joined(separator: "、"))")
-                HStack(spacing: 16) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), alignment: .leading)], alignment: .leading, spacing: 8) {
                     ForEach(names, id: \.self) { name in
                         Label(name, systemImage: "circle.fill")
                             .labelStyle(.titleAndIcon)
