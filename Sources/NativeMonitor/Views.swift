@@ -460,6 +460,7 @@ struct Details: View {
     @State private var glowVisible = false
     @State private var glowGeneration = 0
     @State private var showSettings = false
+    @State private var expandedClusters: Set<Int> = []
     let showOverview: () -> Void
     let close: () -> Void
 
@@ -662,23 +663,56 @@ struct Details: View {
     private var cpuCores: some View {
         let cores = model.snapshot(.cpu).current?.cores ?? []
         return VStack(alignment: .leading, spacing: 12) {
-            Label("逻辑核心", systemImage: "square.grid.3x3.fill").font(.headline)
+            Label("CPU 核心簇", systemImage: "square.grid.3x3.fill").font(.headline)
             if cores.isEmpty { Text("等待核心采样").foregroundStyle(.secondary) }
             if model.coreLabels != nil {
-                Text("类型根据系统拓扑和核心数量推断，颜色用于区分核心类别。")
+                Text("簇来自系统拓扑，核心类型根据拓扑和核心数量推断。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
-                ForEach(Array(cores.enumerated()), id: \.offset) { index, value in
-                    let kind = model.coreLabels.flatMap { index < $0.count ? $0[index] : nil }
-                    let color: Color = kind == "超能核" ? Color(red: 0.78, green: 0.47, blue: 0.98) : kind == "性能核" ? Color(red: 0.48, green: 0.32, blue: 0.9) : kind == "能效核" ? .teal : metricColor
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack { Text("\(kind ?? "核心") \(index + 1)"); Spacer(); Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit() }
-                        ProgressView(value: value ?? 0, total: 100).tint(color)
-                    }.font(.caption).padding(10).modifier(ControlMaterial(reduce: model.reduceTransparency))
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
+            if let clusters = model.coreClusters, !cores.isEmpty {
+                ForEach(clusters) { cluster in
+                    let kind = cluster.indices.first.flatMap { index in model.coreLabels.flatMap { index < $0.count ? $0[index] : nil } }
+                    let sameKind = kind != nil && cluster.indices.allSatisfy { model.coreLabels?[$0] == kind }
+                    let total = cluster.total(cores)
+                    DisclosureGroup(isExpanded: Binding(get: { expandedClusters.contains(cluster.id) }, set: { expanded in
+                        if expanded { expandedClusters.insert(cluster.id) } else { expandedClusters.remove(cluster.id) }
+                    })) {
+                        coreGrid(cluster.indices, cores: cores).padding(.top, 12)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Label("\(sameKind ? kind! + " · " : "")簇 \(cluster.id)", systemImage: "square.grid.2x2")
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                Text("\(cluster.indices.count) 核").font(.caption).foregroundStyle(.secondary)
+                            }
+                            HStack {
+                                Text("总量 \(total.map { ValueFormat.number($0, precision: 1) + "%" } ?? "—") / \(cluster.indices.count * 100)%")
+                                Spacer()
+                                Text("平均 \(total.map { ValueFormat.number($0 / Double(cluster.indices.count), precision: 1) + "%" } ?? "—")")
+                            }.font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                        }.padding(.vertical, 4)
+                    }.padding(12).modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
                 }
+            } else if !cores.isEmpty {
+                Text("无法读取核心簇拓扑，显示全部逻辑核心。")
+                    .font(.caption).foregroundStyle(.secondary)
+                coreGrid(Array(cores.indices), cores: cores)
+            }
+        }
+    }
+    private func coreGrid(_ indices: [Int], cores: [Double?]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
+            ForEach(indices, id: \.self) { index in
+                let value = cores[index]
+                let kind = model.coreLabels.flatMap { index < $0.count ? $0[index] : nil }
+                let color: Color = kind == "超能核" ? Color(red: 0.78, green: 0.47, blue: 0.98) : kind == "性能核" ? Color(red: 0.48, green: 0.32, blue: 0.9) : kind == "能效核" ? .teal : metricColor
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack { Text("\(kind ?? "核心") \(index + 1)"); Spacer(); Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit() }
+                    ProgressView(value: value ?? 0, total: 100).tint(color)
+                }.font(.caption).padding(10).modifier(ControlMaterial(reduce: model.reduceTransparency))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
             }
         }
     }

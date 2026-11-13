@@ -39,7 +39,22 @@ struct MemoryReading {
 struct VolumeReading { let total: UInt64; let available: UInt64 }
 struct InterfaceCounters { let name: String; let counters: Counters }
 
+struct CPUCluster: Identifiable, Equatable {
+    let id: Int
+    let indices: [Int]
+
+    func total(_ values: [Double?]) -> Double? {
+        guard !indices.isEmpty, indices.allSatisfy({ $0 >= 0 && $0 < values.count && values[$0] != nil }) else { return nil }
+        return indices.reduce(0) { $0 + values[$1]! }
+    }
+}
+
 enum CoreTopology {
+    static func clusters(ids: [Int: Int], count: Int) -> [CPUCluster]? {
+        guard count > 0, ids.count == count, (0..<count).allSatisfy({ ids[$0].map { $0 >= 0 } == true }) else { return nil }
+        let groups = Dictionary(grouping: 0..<count, by: { ids[$0]! })
+        return groups.keys.sorted().map { CPUCluster(id: $0, indices: groups[$0]!.sorted()) }
+    }
     // 性能等级只有数量信息时，数量相同的类别不能安全映射到具体核心。
     static func match(types: [Int: String], levels: [(name: String, count: Int)], count: Int) -> [String]? {
         guard count > 0, types.count == count, (0..<count).allSatisfy({ types[$0] != nil }) else { return nil }
@@ -86,21 +101,26 @@ struct SystemReader {
                                nice: UInt64(UInt32(bitPattern: ticks[Int(CPU_STATE_NICE)])))
         }
     }
-    static func coreLabels(count: Int) -> [String]? {
+    static func coreTopology(count: Int) -> (labels: [String]?, clusters: [CPUCluster]?) {
         let root = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/cpus")
-        guard root != 0 else { return nil }
+        guard root != 0 else { return (nil, nil) }
         defer { IOObjectRelease(root) }
         var iterator: io_iterator_t = 0
-        guard IORegistryEntryGetChildIterator(root, kIODeviceTreePlane, &iterator) == KERN_SUCCESS else { return nil }
+        guard IORegistryEntryGetChildIterator(root, kIODeviceTreePlane, &iterator) == KERN_SUCCESS else { return (nil, nil) }
         defer { IOObjectRelease(iterator) }
         var types: [Int: String] = [:]
+        var clusterIDs: [Int: Int] = [:]
+        var duplicateID = false
         while case let child = IOIteratorNext(iterator), child != 0 {
             defer { IOObjectRelease(child) }
-            guard let id = IORegistryEntryCreateCFProperty(child, "logical-cpu-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber,
-                  let data = IORegistryEntryCreateCFProperty(child, "cluster-type" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data,
-                  let type = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .controlCharacters), !type.isEmpty else { continue }
-            types[id.intValue] = type
+            guard let id = IORegistryEntryCreateCFProperty(child, "logical-cpu-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber else { continue }
+            let index = id.intValue
+            if types[index] != nil || clusterIDs[index] != nil { duplicateID = true }
+            if let data = IORegistryEntryCreateCFProperty(child, "cluster-type" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data,
+               let type = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .controlCharacters), !type.isEmpty { types[index] = type }
+            if let cluster = IORegistryEntryCreateCFProperty(child, "logical-cluster-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber { clusterIDs[index] = cluster.intValue }
         }
+        if duplicateID { return (nil, nil) }
         var levels: [(name: String, count: Int)] = []
         for level in 0..<8 {
             var nameBuffer = [CChar](repeating: 0, count: 128), nameSize = nameBuffer.count
@@ -109,7 +129,7 @@ struct SystemReader {
                   sysctlbyname("hw.perflevel\(level).logicalcpu", &cpuCount, &size, nil, 0) == 0 else { break }
             levels.append((String(cString: nameBuffer), Int(cpuCount)))
         }
-        return CoreTopology.match(types: types, levels: levels, count: count)
+        return (CoreTopology.match(types: types, levels: levels, count: count), CoreTopology.clusters(ids: clusterIDs, count: count))
     }
     static func memory() -> MemoryReading? {
         var info = vm_statistics64()

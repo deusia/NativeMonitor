@@ -93,4 +93,17 @@ final class SystemReaderTests: XCTestCase {
         XCTAssertNil(CoreTopology.match(types: [1: "M"], levels: [("Super", 1)], count: 1))
         XCTAssertNil(CoreTopology.match(types: [0: "M", 1: "M", 2: "P", 3: "P"], levels: [("Super", 2), ("Performance", 3)], count: 4))
     }
+    func testClusterGroupingAndMissingCoreSamples() throws {
+        let groups = try XCTUnwrap(CoreTopology.clusters(ids: [0: 2, 1: 1, 2: 1, 3: 2], count: 4))
+        XCTAssertEqual(groups, [CPUCluster(id: 1, indices: [1, 2]), CPUCluster(id: 2, indices: [0, 3])])
+        XCTAssertEqual(groups[0].total([1, 20, 30, 4]), 50)
+        XCTAssertNil(groups[0].total([1, nil, 30, 4]))
+        XCTAssertNil(groups[0].total([1]))
+        XCTAssertNil(CoreTopology.clusters(ids: [0: 0], count: 2))
+        XCTAssertNil(CoreTopology.clusters(ids: [0: -1], count: 1))
+        let local = try XCTUnwrap(SystemReader.cpuCores())
+        if let clusters = SystemReader.coreTopology(count: local.count).clusters {
+            XCTAssertEqual(clusters.flatMap(\.indices).sorted(), Array(local.indices))
+        }
+    }
 }

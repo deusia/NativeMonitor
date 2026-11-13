@@ -164,6 +164,7 @@ struct Snapshot {
     private var gpuRequestDate: Date?
     private let collector = MonitorCollector()
     private(set) var coreLabels: [String]?
+    private(set) var coreClusters: [CPUCluster]?
     private var coreLabelsCount = 0
 
     init(defaults: UserDefaults = .standard) {
@@ -232,7 +233,9 @@ struct Snapshot {
             if let previous = readings[metric], previous.cores.count != reading.cores.count { histories[metric] = [] }
             if !reading.cores.isEmpty && coreLabelsCount != reading.cores.count {
                 coreLabelsCount = reading.cores.count
-                coreLabels = SystemReader.coreLabels(count: reading.cores.count)
+                let topology = SystemReader.coreTopology(count: reading.cores.count)
+                coreLabels = topology.labels
+                coreClusters = topology.clusters
             }
         }
         readings[metric] = reading
