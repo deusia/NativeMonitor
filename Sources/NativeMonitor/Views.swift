@@ -450,6 +450,7 @@ struct Details: View {
                         .frame(height: 180)
                     facts
                     if model.metric == .cpu { cpuCores }
+                    if model.metric == .gpu { gpuAcceleration }
                     DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
                     Divider()
                     comparison
@@ -610,6 +611,33 @@ struct Details: View {
                         .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
                 }
             }
+        }
+    }
+    private var gpuAcceleration: some View {
+        let capabilities = GPUReader.capabilities
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("AI 与图形能力", systemImage: "brain.head.profile").font(.headline)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("GPU Neural Accelerator", systemImage: "cpu")
+                    Text(capabilities.supportsNeuralAccelerator == true ? "支持 · 每个 GPU 核心内置" : "未确认硬件支持")
+                    Text("独立利用率：暂不可读取").foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, minHeight: 72, alignment: .leading).padding(12)
+                    .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Apple Neural Engine", systemImage: "brain")
+                    Text("独立神经网络引擎")
+                    Text("实时利用率：暂不可读取").foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, minHeight: 72, alignment: .leading).padding(12)
+                    .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
+            }.font(.caption)
+            HStack {
+                Text("GPU 核心数（驱动）")
+                Spacer()
+                Text(capabilities.coreCount.map { "\($0)" } ?? "—").monospacedDigit()
+                Text("· 光线追踪")
+                Text(capabilities.supportsRayTracing.map { $0 ? "支持" : "不支持" } ?? "未知")
+            }.font(.caption).foregroundStyle(.secondary)
         }
     }
     private var comparison: some View {

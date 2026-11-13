@@ -2,6 +2,40 @@ import Foundation
 import IOKit
 import Metal
 
+struct GPUCapabilities {
+    let name: String?
+    let supportsNeuralAccelerator: Bool?
+    let supportsRayTracing: Bool?
+    let coreCount: Int?
+
+    static func coreCount(from configuration: [String: Any]) -> Int? {
+        guard let number = configuration["num_cores"] as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        guard value.isFinite, value >= 1, value <= 4096, value.rounded(.towardZero) == value else { return nil }
+        return number.intValue
+    }
+    static func detect() -> GPUCapabilities {
+        let device = MTLCreateSystemDefaultDevice()
+        var neural: Bool?
+        if #available(macOS 15.0, *), let device { neural = device.supportsFamily(.apple10) }
+        var iterator: io_iterator_t = 0
+        var counts: [Int?] = []
+        if IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iterator) == KERN_SUCCESS {
+            defer { IOObjectRelease(iterator) }
+            while case let service = IOIteratorNext(iterator), service != 0 {
+                defer { IOObjectRelease(service) }
+                guard let driver = IORegistryEntryCreateCFProperty(service, "IOClass" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String,
+                      driver.hasPrefix("AGX") else { continue }
+                let config = IORegistryEntryCreateCFProperty(service, "GPUConfigurationVariable" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any]
+                counts.append(config.flatMap { coreCount(from: $0) })
+            }
+        }
+        return GPUCapabilities(name: device?.name, supportsNeuralAccelerator: neural,
+                               supportsRayTracing: device?.supportsRaytracing, coreCount: counts.count == 1 ? counts[0] : nil)
+    }
+}
+
 struct GPUReading {
     let date: Date
     let driver: String
@@ -43,6 +77,7 @@ enum GPUReadError: Error, LocalizedError {
     }
 }
 enum GPUReader {
+    static let capabilities = GPUCapabilities.detect()
     static func read() -> Result<GPUReading, GPUReadError> {
         var iterator: io_iterator_t = 0
         guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iterator) == KERN_SUCCESS else {

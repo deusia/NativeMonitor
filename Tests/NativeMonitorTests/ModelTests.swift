@@ -217,4 +217,11 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(gpu.allocatedMemory, 1024)
         XCTAssertNil(gpu.usedMemory)
     }
+    func testGPUCoreCountValidation() {
+        XCTAssertEqual(GPUCapabilities.coreCount(from: ["num_cores": 40]), 40)
+        for value: Any in [true, -1, 0, 1.5, Double.nan, 4097, "40"] {
+            XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": value]))
+        }
+        XCTAssertNil(GPUCapabilities.coreCount(from: [:]))
+    }
 }
