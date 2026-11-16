@@ -154,50 +154,50 @@ struct MonitorSettings: View {
                 Button("完成", action: close).modifier(GlassButton(reduce: model.reduceTransparency))
             }
             ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                SettingsMenu(title: "外观", selection: $model.theme,
-                             options: Theme.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
-                    .accessibilityIdentifier("themePicker")
-                SettingsMenu(title: "历史范围", selection: $model.range,
-                             options: HistoryRange.allCases.map { ($0, $0.label) }, reduce: model.reduceTransparency)
-                SettingsMenu(title: "采样间隔", selection: $model.interval,
-                             options: [1, 2, 5].map { ($0, "\($0) 秒") }, reduce: model.reduceTransparency)
-                SettingsMenu(title: "CPU 口径", selection: $model.cpuScale,
-                             options: CPUScale.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
-                SettingsMenu(title: "主读数小数位", selection: $model.precision,
-                             options: [0, 1, 2].map { ($0, "最多 \($0) 位") }, reduce: model.reduceTransparency)
-                Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Toggle("固定窗口", isOn: $model.pinWindows).toggleStyle(.switch)
-                    .accessibilityIdentifier("pinWindows")
-                Text("关闭时，切换到其他应用会收起窗口；开启后保持显示。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
-                Divider()
-                Text("背景效果").font(.headline)
-                SettingsMenu(title: "调整区域", selection: $appearanceRegion,
-                             options: AppearanceRegion.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
-                VStack(spacing: 12) {
-                    appearanceSlider("通透度", value: $model.appearance[appearanceRegion].clarity, range: 0...1)
-                    appearanceSlider("透明度", value: $model.appearance[appearanceRegion].transparency, range: 0...1)
-                    appearanceSlider("模糊度", value: $model.appearance[appearanceRegion].blur, range: 0...30)
-                }.disabled(model.reduceTransparency || systemReduce)
-                Text("通透度调整底色浓淡，透明度调整背景可见程度，模糊度调整背景模糊半径。文字和图表保持清晰。")
-                    .font(.caption).foregroundStyle(.secondary)
-                if model.reduceTransparency || systemReduce {
-                    Text("减少透明度已开启，背景效果暂不生效。关闭后恢复自定义效果。")
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsMenu(title: "外观", selection: $model.theme,
+                                 options: Theme.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+                        .accessibilityIdentifier("themePicker")
+                    SettingsMenu(title: "历史范围", selection: $model.range,
+                                 options: HistoryRange.allCases.map { ($0, $0.label) }, reduce: model.reduceTransparency)
+                    SettingsMenu(title: "采样间隔", selection: $model.interval,
+                                 options: [1, 2, 5].map { ($0, "\($0) 秒") }, reduce: model.reduceTransparency)
+                    SettingsMenu(title: "CPU 口径", selection: $model.cpuScale,
+                                 options: CPUScale.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+                    SettingsMenu(title: "主读数小数位", selection: $model.precision,
+                                 options: [0, 1, 2].map { ($0, "最多 \($0) 位") }, reduce: model.reduceTransparency)
+                    Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
                         .font(.caption).foregroundStyle(.secondary)
+                    Toggle("固定窗口", isOn: $model.pinWindows).toggleStyle(.switch)
+                        .accessibilityIdentifier("pinWindows")
+                    Text("关闭时，切换到其他应用会收起窗口；开启后保持显示。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
+                    Divider()
+                    Text("背景效果").font(.headline)
+                    SettingsMenu(title: "调整区域", selection: $appearanceRegion,
+                                 options: AppearanceRegion.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+                    VStack(spacing: 12) {
+                        appearanceSlider("通透度", value: $model.appearance[appearanceRegion].clarity, range: 0...1)
+                        appearanceSlider("透明度", value: $model.appearance[appearanceRegion].transparency, range: 0...1)
+                        appearanceSlider("模糊度", value: $model.appearance[appearanceRegion].blur, range: 0...30)
+                    }.disabled(model.reduceTransparency || systemReduce)
+                    Text("通透度调整底色浓淡，透明度调整背景可见程度，模糊度调整背景模糊半径。文字和图表保持清晰。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if model.reduceTransparency || systemReduce {
+                        Text("减少透明度已开启，背景效果暂不生效。关闭后恢复自定义效果。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Button("恢复本区域") { model.appearance[appearanceRegion] = SurfaceAppearance() }
+                        Spacer()
+                        Button("恢复全部背景") { model.appearance = AppearanceSettings() }
+                    }
+                    if !model.reduceTransparency && !systemReduce {
+                        BackdropStatus(diagnostics: model.backdropDiagnostics)
+                    }
+                    Text("设置只影响本应用。").font(.caption).foregroundStyle(.secondary)
                 }
-                HStack {
-                    Button("恢复本区域") { model.appearance[appearanceRegion] = SurfaceAppearance() }
-                    Spacer()
-                    Button("恢复全部背景") { model.appearance = AppearanceSettings() }
-                }
-                if !model.reduceTransparency && !systemReduce {
-                    BackdropStatus(diagnostics: model.backdropDiagnostics)
-                }
-                Text("设置只影响本应用。").font(.caption).foregroundStyle(.secondary)
-            }
             }.frame(maxHeight: 560)
         }.font(.system(size: 12)).padding(18).frame(width: 350)
             .environment(\.monitorAppearance, model.appearance)
@@ -572,17 +572,46 @@ struct WindowGlass: ViewModifier {
             }
     }
 }
+// 一次只保留一页前景；快速切换由 .task(id:) 取消旧任务，背景不参与过渡。
+@MainActor final class MetricPageTransition: ObservableObject {
+    @Published private(set) var metric: Metric
+    @Published private(set) var visible = true
+    init(metric: Metric) { self.metric = metric }
+    func show(_ target: Metric, animated: Bool) async {
+        guard !Task.isCancelled else { return }
+        guard animated, metric != target else {
+            metric = target
+            withAnimation(animated ? .easeOut(duration: 0.16) : nil) { visible = true }
+            return
+        }
+        withAnimation(.easeOut(duration: 0.09)) { visible = false }
+        do { try await Task.sleep(for: .milliseconds(90)) }
+        catch { return }
+        guard !Task.isCancelled else { return }
+        metric = target
+        withAnimation(.easeOut(duration: 0.16)) { visible = true }
+    }
+}
+
 struct Details: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: MonitorModel
     private var metricColor: Color { colorScheme == .dark ? darkMetricColor : .accentColor }
+    @StateObject private var pageTransition: MetricPageTransition
     @State private var sidebarVisible = true
     @State private var showSettings = false
     @State private var expandedClusters: Set<Int> = []
     let showOverview: () -> Void
     let close: () -> Void
+
+    init(model: MonitorModel, showOverview: @escaping () -> Void, close: @escaping () -> Void) {
+        self.model = model
+        self.showOverview = showOverview
+        self.close = close
+        _pageTransition = StateObject(wrappedValue: MetricPageTransition(metric: model.metric))
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -607,6 +636,19 @@ struct Details: View {
                                 .foregroundStyle(model.metric == metric ? metricColor : Color.primary)
                         }.modifier(GlassButton(reduce: model.reduceTransparency, translucent: true))
                             .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.025 + Double(index) * 0.02))
+                            .overlay {
+                                if !reduceMotion {
+                                    Capsule().strokeBorder(metricColor.opacity(0.7), lineWidth: 1.5)
+                                        .shadow(color: metricColor.opacity(0.45), radius: 5)
+                                        .phaseAnimator([0.0, 1.0, 0.0], trigger: model.metric) { glow, phase in
+                                            glow.opacity(model.metric == metric && model.detailsPresented ? phase : 0)
+                                                .scaleEffect(1 + phase * 0.025)
+                                        } animation: { phase in
+                                            .easeOut(duration: phase == 1 ? 0.12 : 0.28)
+                                        }
+                                        .allowsHitTesting(false).accessibilityHidden(true)
+                                }
+                            }
                             .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.metric)
                             .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command, .option])
                             .help("切换到\(metric.rawValue) · ⌥⌘\(index + 1)")
@@ -620,26 +662,26 @@ struct Details: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    if model.metric == .sensors {
+                    if pageTransition.metric == .sensors {
                         sensorPage
                     } else {
                     hero
-                    Trend(snapshot: model.snapshot(model.metric), range: model.range).equatable()
+                    Trend(snapshot: model.snapshot(pageTransition.metric), range: model.range).equatable()
                         .frame(height: 180)
                     facts
-                    if model.metric == .cpu { cpuCores }
-                    if model.metric == .gpu { gpuAcceleration }
-                    if model.metric == .memory {
+                    if pageTransition.metric == .cpu { cpuCores }
+                    if pageTransition.metric == .gpu { gpuAcceleration }
+                    if pageTransition.metric == .memory {
                         MemorySeriesCharts(snapshot: model.snapshot(.memory), range: model.range, reduce: model.reduceTransparency).equatable()
                     } else {
-                        DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range).equatable()
+                        DetailSeriesChart(snapshot: model.snapshot(pageTransition.metric), range: model.range).equatable()
                     }
                     Divider()
                     comparison
                     Divider()
                     breakdown
                     DisclosureGroup("口径说明") {
-                        Text(model.snapshot(model.metric).note)
+                        Text(model.snapshot(pageTransition.metric).note)
                             .font(.callout).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
                         Text("图表显示本次运行的数据，最多保留 24 小时。")
@@ -650,7 +692,10 @@ struct Details: View {
                 }.padding(28).frame(maxWidth: 1000, alignment: .leading).frame(maxWidth: .infinity)
             }
             // 切换指标时重置滚动位置；采样、范围和主题更新保留当前页面状态。
-            .id(model.metric)
+            .id(pageTransition.metric)
+            .opacity(pageTransition.visible ? 1 : 0)
+            .offset(y: reduceMotion || pageTransition.visible ? 0 : 6)
+            .allowsHitTesting(pageTransition.visible)
             .modifier(ControlMaterial(region: .cards, cornerRadius: 24, materialOpacity: 0.65, reduce: model.reduceTransparency))
             .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.04))
             .navigationTitle("性能监控")
@@ -672,6 +717,9 @@ struct Details: View {
         .frame(minWidth: 640, minHeight: 520)
         .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, diagnostics: model.backdropDiagnostics, appearance: model.appearance[.details]))
         .environment(\.monitorAppearance, model.appearance)
+        .task(id: model.metric) {
+            await pageTransition.show(model.metric, animated: !reduceMotion && model.detailsPresented)
+        }
         .onExitCommand(perform: close)
     }
 
@@ -706,10 +754,9 @@ struct Details: View {
                 MonitorSettings(model: model, close: { showSettings = false })
             }
             Button(action: close) {
-                Image(systemName: "xmark").font(.system(size: 16)).frame(width: 36, height: 36)
-                    .contentShape(Circle())
+                Image(systemName: "xmark").font(.system(size: 16)).frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
+            .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
             .help("关闭详情").accessibilityLabel("关闭详情")
         }
     }
@@ -783,10 +830,10 @@ struct Details: View {
         }.font(.callout)
     }
     private var hero: some View {
-        let snapshot = model.snapshot(model.metric)
+        let snapshot = model.snapshot(pageTransition.metric)
         return VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center) {
-                Label(model.metric.rawValue, systemImage: model.metric.symbol).font(.system(size: 22, weight: .semibold))
+                Label(pageTransition.metric.rawValue, systemImage: pageTransition.metric.symbol).font(.system(size: 22, weight: .semibold))
                 Spacer(minLength: 12)
                 RangePicker(model: model)
             }
@@ -807,7 +854,7 @@ struct Details: View {
     }
     private var facts: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], alignment: .leading, spacing: 10) {
-            ForEach(model.snapshot(model.metric).facts) { fact in
+            ForEach(model.snapshot(pageTransition.metric).facts) { fact in
                 VStack(alignment: .leading, spacing: 7) {
                     Text(fact.label).font(.caption).foregroundStyle(.primary)
                     Text(fact.value).font(.system(size: 17, weight: .medium)).monospacedDigit()
@@ -918,7 +965,7 @@ struct Details: View {
         }
     }
     private var breakdown: some View {
-        let snapshot = model.snapshot(model.metric)
+        let snapshot = model.snapshot(pageTransition.metric)
         let rows = snapshot.rows
         return VStack(alignment: .leading, spacing: 12) {
             Text("细分信息")

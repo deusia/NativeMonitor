@@ -394,6 +394,34 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(snapshot.maximum(.short), 0.001)
         XCTAssertNil(snapshot.value)
     }
+    @MainActor func testPageTransitionCancelsOldTargetAndOnlyReplacesAfterFadeOut() async throws {
+        let transition = MetricPageTransition(metric: .cpu)
+        let first = Task { await transition.show(.gpu, animated: true) }
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(transition.metric, .cpu)
+        XCTAssertFalse(transition.visible)
+        first.cancel()
+        let latest = Task { await transition.show(.memory, animated: true) }
+        await first.value
+        await latest.value
+        XCTAssertEqual(transition.metric, .memory)
+        XCTAssertTrue(transition.visible)
+        await transition.show(.network, animated: false)
+        XCTAssertEqual(transition.metric, .network)
+        XCTAssertTrue(transition.visible)
+    }
+
+    @MainActor func testReturningToCurrentPageCancelsFadeWithoutLeavingItInvisible() async throws {
+        let transition = MetricPageTransition(metric: .cpu)
+        let outgoing = Task { await transition.show(.gpu, animated: true) }
+        try await Task.sleep(for: .milliseconds(20))
+        outgoing.cancel()
+        await transition.show(.cpu, animated: true)
+        await outgoing.value
+        XCTAssertEqual(transition.metric, .cpu)
+        XCTAssertTrue(transition.visible)
+    }
+
     func testSamplingRequestTimeoutAndStopDoNotQueueOrAcceptLateResults() {
         var request = SamplingRequest()
         XCTAssertTrue(request.begin(at: 100))
