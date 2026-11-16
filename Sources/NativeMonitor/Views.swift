@@ -728,7 +728,8 @@ struct Details: View {
             .frame(width: 190).frame(maxHeight: .infinity)
             }
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                // 屏幕外的图表不提前布局，避免它们与滚动同时争抢主线程。
+                LazyVStack(alignment: .leading, spacing: 24) {
                     if pageTransition.metric == .sensors {
                         sensorPage
                     } else {
@@ -740,7 +741,8 @@ struct Details: View {
                     if pageTransition.metric == .gpu { gpuAcceleration }
                     if pageTransition.metric == .memory {
                         MemorySeriesCharts(snapshot: model.snapshot(.memory), range: model.range, reduce: model.reduceTransparency).equatable()
-                    } else {
+                    } else if pageTransition.metric != .network {
+                        // 网络主图已展示完整上下行，避免再绘制内容相同的分项图。
                         DetailSeriesChart(snapshot: model.snapshot(pageTransition.metric), range: model.range).equatable()
                     }
                     Divider()
@@ -866,7 +868,7 @@ struct Details: View {
                         if groups.isEmpty { Text("未发现可读取的温度传感器").font(.callout).foregroundStyle(.secondary) }
                         ForEach(groups, id: \.key) { group in
                             DisclosureGroup {
-                                VStack(alignment: .leading, spacing: 10) {
+                                LazyVStack(alignment: .leading, spacing: 10) {
                                     ForEach(group.readings) { sensor in sensorRow(sensor) }
                                 }.padding(.top, 10)
                             } label: {

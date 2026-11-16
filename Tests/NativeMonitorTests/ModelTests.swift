@@ -13,6 +13,11 @@ private final class DragProbeWindow: NSWindow {
     var dragCount = 0
     override func performDrag(with event: NSEvent) { dragCount += 1 }
 }
+private func statusValues(_ cpu: String, _ memory: String, _ network: String, _ unit: String) -> [StatusReadoutValue] {
+    [StatusReadoutValue(number: cpu, unit: cpu == "—" ? "" : "%"),
+     StatusReadoutValue(number: memory, unit: memory == "—" ? "" : "G"),
+     StatusReadoutValue(number: network, unit: unit.isEmpty ? "" : " " + unit, prefix: "↓")]
+}
 final class ModelTests: XCTestCase {
     @MainActor func testInvisibleDragAreaDoesNotExpandHeader() throws {
         let suite = "NativeMonitorTests.\(UUID().uuidString)"
@@ -47,10 +52,10 @@ final class ModelTests: XCTestCase {
 
     @MainActor func testStatusReadoutOnlyReconfiguresLayoutWhenSettingsChange() {
         let readout = StatusReadout(cpuScale: .average, precision: 0)
-        XCTAssertFalse(readout.update(["9%", "10G", "↓0 B/s"], cpuScale: .average, precision: 0))
-        XCTAssertTrue(readout.update(["9.1%", "10.1G", "↓1 B/s"], cpuScale: .average, precision: 1))
-        XCTAssertFalse(readout.update(["99%", "20G", "↓999 MB/s"], cpuScale: .average, precision: 1))
-        XCTAssertTrue(readout.update(["999%", "20G", "↓999 MB/s"], cpuScale: .total, precision: 1))
+        XCTAssertFalse(readout.update(statusValues("9", "10", "0", "B/s"), cpuScale: .average, precision: 0))
+        XCTAssertTrue(readout.update(statusValues("9.1", "10.1", "1", "B/s"), cpuScale: .average, precision: 1))
+        XCTAssertFalse(readout.update(statusValues("99", "20", "999", "MB/s"), cpuScale: .average, precision: 1))
+        XCTAssertTrue(readout.update(statusValues("999", "20", "999", "MB/s"), cpuScale: .total, precision: 1))
     }
 
     @MainActor func testMaterialChangesPreserveContentIdentity() {
@@ -200,32 +205,34 @@ final class ModelTests: XCTestCase {
                 let readout = StatusReadout(cpuScale: scale, precision: precision)
                 readout.setFrameSize(readout.fittingSize)
                 readout.layoutSubtreeIfNeeded()
-                let fields = try readout.arrangedSubviews.map { try XCTUnwrap($0 as? NSHostingView<StatusReadoutText>) }
+                let fields = try readout.arrangedSubviews.map { try XCTUnwrap($0 as? StatusReadoutColumn) }
                 let frames = fields.map(\.frame)
                 let width = readout.fittingSize.width
                 let maximumCPU = scale == .average ? 100 : Double(ProcessInfo.processInfo.processorCount * 100)
                 let maximumMemory = ValueFormat.memoryGigabytes(ProcessInfo.processInfo.physicalMemory)
                 for value in [0.0, 0.001, 9.99, 10, 99.99, 100, 999.999, maximumCPU, maximumMemory] {
                     for rate in [0.0, 0.001, 999.99, 1000, 999_999.999, 1_000_000, 999_999_999.999, 1_000_000_000, 1_000_000_000_000] {
-                        let values = [ValueFormat.number(min(value, maximumCPU), precision: precision) + "%",
-                                      ValueFormat.number(min(value, maximumMemory), precision: precision) + "G",
-                                      "↓" + ValueFormat.rate(rate, precision: precision)]
+                        let network = ValueFormat.display(rate / 1e6, metric: .network, precision: precision)
+                        let values = statusValues(ValueFormat.number(min(value, maximumCPU), precision: precision),
+                                                  ValueFormat.number(min(value, maximumMemory), precision: precision), network.0, network.1)
                         readout.update(values, cpuScale: scale, precision: precision)
                         readout.layoutSubtreeIfNeeded()
                         XCTAssertEqual(fields.map(\.frame), frames)
                         XCTAssertEqual(readout.fittingSize.width, width)
                         for (field, value) in zip(fields, values) {
-                            XCTAssertEqual(field.rootView.reading.text, value)
-                            XCTAssertLessThanOrEqual((value as NSString).size(withAttributes: [.font: StatusReadout.font]).width, field.frame.width)
+                            XCTAssertEqual(field.stringValue, value.text)
+                            XCTAssertEqual(field.unit.alignmentRect(forFrame: field.unit.frame).minX,
+                                           field.number.alignmentRect(forFrame: field.number.frame).maxX, accuracy: 1)
+                            XCTAssertLessThanOrEqual((value.text as NSString).size(withAttributes: [.font: StatusReadout.font]).width, field.frame.width)
                         }
                     }
                 }
-                readout.update(["—", "—", "↓—"], cpuScale: scale, precision: precision)
+                readout.update(statusValues("—", "—", "—", ""), cpuScale: scale, precision: precision)
                 readout.layoutSubtreeIfNeeded()
                 XCTAssertEqual(fields.map(\.frame), frames)
                 XCTAssertEqual(readout.fittingSize.width, width)
                 XCTAssertNil(readout.hitTest(.zero))
-                XCTAssertEqual(fields[2].rootView.alignment, .leading)
+                XCTAssertTrue(fields[2].arrangedSubviews.first === fields[2].prefix)
             }
         }
     }
@@ -238,19 +245,35 @@ final class ModelTests: XCTestCase {
         window.contentView = readout
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-        readout.update(["9%", "9G", "↓999 B/s"], cpuScale: .average, precision: 0)
+        readout.update(statusValues("9", "9", "999", "B/s"), cpuScale: .average, precision: 0)
         readout.layoutSubtreeIfNeeded()
-        let fields = try readout.arrangedSubviews.map { try XCTUnwrap($0 as? NSHostingView<StatusReadoutText>) }
+        window.displayIfNeeded()
+        let fields = try readout.arrangedSubviews.map { try XCTUnwrap($0 as? StatusReadoutColumn) }
         let frames = fields.map(\.frame)
-        let readings = fields.map { ObjectIdentifier($0.rootView.reading) }
-        for values in [["100%", "10G", "↓1 MB/s"], ["1%", "9G", "↓999 KB/s"], ["—", "—", "↓—"]] {
+        let readings = fields.map { ObjectIdentifier($0) }
+        for values in [statusValues("100", "10", "1", "MB/s"), statusValues("1", "9", "999", "KB/s"),
+                       statusValues("1", "9", "999", "MB/s"), statusValues("—", "—", "—", "")] {
+            let previousNumbers = fields.map { $0.number.stringValue }
+            let previousReadings = fields.map(\.stringValue)
             readout.update(values, cpuScale: .average, precision: 0)
+            for (index, field) in fields.enumerated() {
+                XCTAssertNil(field.unit.layer?.animation(forKey: kCATransition))
+                XCTAssertNil(field.prefix.layer?.animation(forKey: kCATransition))
+                // 完全相同的读数不触碰现有图层，只有单位切换时才要求清除旧数字过渡。
+                if previousReadings[index] == values[index].text { continue }
+                if values[index].number == "—" || values[index].number == previousNumbers[index]
+                    || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    XCTAssertNil(field.number.layer?.animation(forKey: kCATransition))
+                } else {
+                    XCTAssertEqual(field.number.layer?.animation(forKey: kCATransition)?.duration, 0.22)
+                }
+            }
             for _ in 0..<3 {
                 RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
                 readout.layoutSubtreeIfNeeded()
                 XCTAssertEqual(fields.map(\.frame), frames)
-                XCTAssertEqual(fields.map { ObjectIdentifier($0.rootView.reading) }, readings)
-                XCTAssertEqual(fields.map { $0.rootView.reading.text }, values)
+                XCTAssertEqual(fields.map { ObjectIdentifier($0) }, readings)
+                XCTAssertEqual(fields.map { $0.stringValue }, values.map(\.text))
             }
         }
     }
@@ -258,9 +281,9 @@ final class ModelTests: XCTestCase {
     @MainActor func testStatusReadoutUsesCompactWidthsForCurrentSettings() {
         let readout = StatusReadout(cpuScale: .average, precision: 0)
         let compactWidth = readout.fittingSize.width
-        readout.update(["16%", "19G", "↓8 KB/s"], cpuScale: .total, precision: 2)
+        readout.update(statusValues("16", "19", "8", "KB/s"), cpuScale: .total, precision: 2)
         XCTAssertGreaterThan(readout.fittingSize.width - compactWidth, 30)
-        readout.update(["16%", "19G", "↓8 KB/s"], cpuScale: .average, precision: 0)
+        readout.update(statusValues("16", "19", "8", "KB/s"), cpuScale: .average, precision: 0)
         XCTAssertEqual(readout.fittingSize.width, compactWidth)
     }
 
