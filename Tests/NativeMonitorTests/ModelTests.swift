@@ -165,7 +165,7 @@ final class ModelTests: XCTestCase {
                 let readout = StatusReadout(cpuScale: scale, precision: precision)
                 readout.setFrameSize(readout.fittingSize)
                 readout.layoutSubtreeIfNeeded()
-                let fields = try readout.arrangedSubviews.map { try XCTUnwrap($0 as? NSTextField) }
+                let fields = try readout.arrangedSubviews.map { try XCTUnwrap($0 as? NSHostingView<StatusReadoutText>) }
                 let frames = fields.map(\.frame)
                 let width = readout.fittingSize.width
                 let maximumCPU = scale == .average ? 100 : Double(ProcessInfo.processInfo.processorCount * 100)
@@ -180,8 +180,8 @@ final class ModelTests: XCTestCase {
                         XCTAssertEqual(fields.map(\.frame), frames)
                         XCTAssertEqual(readout.fittingSize.width, width)
                         for (field, value) in zip(fields, values) {
-                            XCTAssertEqual(field.stringValue, value)
-                            XCTAssertLessThanOrEqual(field.cell!.cellSize.width, field.frame.width)
+                            XCTAssertEqual(field.rootView.reading.text, value)
+                            XCTAssertLessThanOrEqual((value as NSString).size(withAttributes: [.font: StatusReadout.font]).width, field.frame.width)
                         }
                     }
                 }
@@ -190,7 +190,32 @@ final class ModelTests: XCTestCase {
                 XCTAssertEqual(fields.map(\.frame), frames)
                 XCTAssertEqual(readout.fittingSize.width, width)
                 XCTAssertNil(readout.hitTest(.zero))
-                XCTAssertEqual(fields[2].alignment, .left)
+                XCTAssertEqual(fields[2].rootView.alignment, .leading)
+            }
+        }
+    }
+
+    @MainActor func testStatusAnimationKeepsMountedColumnsAndContentStable() throws {
+        let readout = StatusReadout(cpuScale: .average, precision: 0)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: readout.fittingSize),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = readout
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        readout.update(["9%", "9G", "↓999 B/s"], cpuScale: .average, precision: 0)
+        readout.layoutSubtreeIfNeeded()
+        let fields = try readout.arrangedSubviews.map { try XCTUnwrap($0 as? NSHostingView<StatusReadoutText>) }
+        let frames = fields.map(\.frame)
+        let readings = fields.map { ObjectIdentifier($0.rootView.reading) }
+        for values in [["100%", "10G", "↓1 MB/s"], ["1%", "9G", "↓999 KB/s"], ["—", "—", "↓—"]] {
+            readout.update(values, cpuScale: .average, precision: 0)
+            for _ in 0..<3 {
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+                readout.layoutSubtreeIfNeeded()
+                XCTAssertEqual(fields.map(\.frame), frames)
+                XCTAssertEqual(fields.map { ObjectIdentifier($0.rootView.reading) }, readings)
+                XCTAssertEqual(fields.map { $0.rootView.reading.text }, values)
             }
         }
     }
