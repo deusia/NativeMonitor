@@ -3,7 +3,153 @@ import AppKit
 import PrivateBackdrop
 import SwiftUI
 @testable import NativeMonitor
+private struct MaterialContentProbe: NSViewRepresentable {
+    let created: () -> Void
+    func makeNSView(context: Context) -> NSView { created(); return NSView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+}
 final class ModelTests: XCTestCase {
+    @MainActor func testMaterialChangesPreserveContentIdentity() {
+        var creations = 0
+        func root(_ appearance: AppearanceSettings, reduce: Bool) -> some View {
+            MaterialContentProbe(created: { creations += 1 })
+                .frame(width: 200, height: 100)
+                .modifier(ControlMaterial(reduce: reduce))
+                .environment(\.monitorAppearance, appearance)
+        }
+        var appearance = AppearanceSettings()
+        let host = NSHostingView(rootView: root(appearance, reduce: false))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(creations, 1)
+        appearance[.controls].blur = 20
+        host.rootView = root(appearance, reduce: false)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(creations, 1)
+        host.rootView = root(AppearanceSettings(), reduce: true)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(creations, 1)
+    }
+
+    @MainActor func testFocusLossHidesUnpinnedWindowsAndKeepsPinnedWindows() {
+        let suite = "NativeMonitorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let delegate = AppDelegate(defaults: defaults)
+        let panel = OverviewPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+        let details = DetailWindow(contentRect: panel.frame, styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                                   backing: .buffered, defer: false)
+        delegate.overviewPanel = panel
+        delegate.detailWindow = details
+        panel.orderFront(nil); details.orderFront(nil)
+        defer { panel.orderOut(nil); details.orderOut(nil) }
+        XCTAssertFalse(delegate.model.pinWindows)
+        delegate.model.pinWindows = true
+        XCTAssertTrue(MonitorModel(defaults: defaults).pinWindows)
+        let notification = Notification(name: NSApplication.didResignActiveNotification)
+        delegate.applicationDidResignActive(notification)
+        XCTAssertTrue(panel.isVisible); XCTAssertTrue(details.isVisible)
+        XCTAssertTrue(delegate.closingWindows.isEmpty)
+        delegate.model.pinWindows = false
+        delegate.applicationDidResignActive(notification)
+        XCTAssertTrue(delegate.closingWindows.contains(ObjectIdentifier(panel)))
+        XCTAssertTrue(delegate.closingWindows.contains(ObjectIdentifier(details)))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.55))
+        XCTAssertFalse(panel.isVisible); XCTAssertFalse(details.isVisible)
+        XCTAssertFalse(MonitorModel(defaults: defaults).pinWindows)
+    }
+
+    @MainActor func testDetailWindowHidesTrafficLightsAndRetainsCloseAction() {
+        let window = DetailWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.installChrome()
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            XCTAssertEqual(window.standardWindowButton(button)?.isHidden, true)
+        }
+        window.orderFront(nil)
+        window.cancelOperation(nil)
+        XCTAssertFalse(window.isVisible)
+    }
+
+    @MainActor func testAppearancePersistsIndependentlyAndResets() {
+        let suite = "NativeMonitorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = MonitorModel(defaults: defaults)
+        for region in AppearanceRegion.allCases { XCTAssertEqual(model.appearance[region], SurfaceAppearance()) }
+        model.appearance[.overview] = SurfaceAppearance(clarity: 0.8, transparency: 0.4, blur: 12)
+        model.appearance[.cards].blur = 25
+        let restored = MonitorModel(defaults: defaults)
+        XCTAssertEqual(restored.appearance[.overview], model.appearance[.overview])
+        XCTAssertEqual(restored.appearance[.cards].blur, 25)
+        XCTAssertEqual(restored.appearance[.details], SurfaceAppearance())
+        XCTAssertEqual(restored.appearance[.controls], SurfaceAppearance())
+        restored.reduceTransparency = true
+        XCTAssertEqual(restored.appearance[.overview].blur, 12)
+        restored.appearance[.overview] = SurfaceAppearance()
+        XCTAssertEqual(restored.appearance[.cards].blur, 25)
+        restored.appearance = AppearanceSettings()
+        let reset = MonitorModel(defaults: defaults)
+        for region in AppearanceRegion.allCases { XCTAssertEqual(reset.appearance[region], SurfaceAppearance()) }
+        XCTAssertTrue(reset.reduceTransparency)
+    }
+
+    func testAppearanceRejectsInvalidValues() {
+        XCTAssertEqual(SurfaceAppearance(clarity: .nan, transparency: .infinity, blur: -.infinity), SurfaceAppearance())
+        XCTAssertEqual(SurfaceAppearance(clarity: -1, transparency: 2, blur: 99),
+                       SurfaceAppearance(clarity: 0, transparency: 1, blur: 30))
+        let suite = "NativeMonitorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(-100, forKey: "appearance.overview.blur")
+        defaults.set("invalid", forKey: "appearance.cards.transparency")
+        let settings = AppearanceSettings(defaults: defaults)
+        XCTAssertEqual(settings[.overview].blur, 0)
+        XCTAssertEqual(settings[.cards].transparency, 0)
+    }
+
+    @MainActor func testBackdropCustomParametersAndPresentation() throws {
+        let view = NMPrivateBackdropView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        view.appearance = NSAppearance(named: .aqua)
+        view.configure(withBlurRadius: 18, opacity: 0.4, dimming: 2, fadesEdges: false)
+        view.layout()
+        let layers = try XCTUnwrap(view.layer?.sublayers)
+        let blur = try XCTUnwrap(layers.first?.filters?.first as? NSObject)
+        XCTAssertEqual(try XCTUnwrap(blur.value(forKey: "inputRadius") as? Double), 18)
+        XCTAssertEqual(try XCTUnwrap(layers.last?.backgroundColor).alpha, 0.12, accuracy: 0.001)
+        let image = try XCTUnwrap(layers.last?.mask?.contents) as! CGImage
+        XCTAssertEqual(try XCTUnwrap(NSBitmapImageRep(cgImage: image).colorAt(x: 0, y: 0)).alphaComponent, 1)
+        view.setPresented(true, animated: false)
+        for layer in layers { XCTAssertEqual(layer.opacity, 0.4, accuracy: 0.001) }
+        view.setPresented(false, animated: true)
+        view.configure(withBlurRadius: 0, opacity: 0.7, dimming: 0, fadesEdges: true)
+        for layer in layers { XCTAssertEqual(layer.opacity, 0) }
+        view.setPresented(true, animated: false)
+        for layer in layers { XCTAssertEqual(layer.opacity, 0.7, accuracy: 0.001) }
+        XCTAssertEqual(try XCTUnwrap(layers.last?.backgroundColor).alpha, 0)
+        view.configure(withBlurRadius: .nan, opacity: .infinity, dimming: -.infinity, fadesEdges: true)
+        XCTAssertEqual(try XCTUnwrap(blur.value(forKey: "inputRadius") as? Double), 2)
+        for layer in layers { XCTAssertEqual(layer.opacity, 1) }
+    }
+
+    @MainActor func testMultipleBackdropsRestoreWindowConfigurationAfterLastRemoval() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        let oldFlatten = try XCTUnwrap(window.value(forKey: "shouldAutoFlattenLayerTree") as? Bool)
+        let oldHosting = try XCTUnwrap(window.value(forKey: "canHostLayersInWindowServer") as? Bool)
+        let first = NMPrivateBackdropView(frame: window.contentView!.bounds)
+        let second = NMPrivateBackdropView(frame: window.contentView!.bounds)
+        window.contentView!.addSubview(first)
+        window.contentView!.addSubview(second)
+        first.removeFromSuperview()
+        XCTAssertEqual(window.value(forKey: "shouldAutoFlattenLayerTree") as? Bool, false)
+        XCTAssertEqual(window.value(forKey: "canHostLayersInWindowServer") as? Bool, true)
+        second.removeFromSuperview()
+        XCTAssertEqual(window.value(forKey: "shouldAutoFlattenLayerTree") as? Bool, oldFlatten)
+        XCTAssertEqual(window.value(forKey: "canHostLayersInWindowServer") as? Bool, oldHosting)
+    }
+
     @MainActor func testStatusReadoutKeepsColumnsFixedAcrossDigitAndUnitChanges() throws {
         let readout = StatusReadout()
         readout.setFrameSize(readout.fittingSize)
