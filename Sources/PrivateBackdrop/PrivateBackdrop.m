@@ -45,7 +45,7 @@ static CGImageRef Mask(size_t w, size_t h) {
         self.backdrop=[cls layer];
         self.blur=((id(*)(id,SEL,id))objc_msgSend)(filter,selector,@"variableBlur");
         if(!self.blur) return self;
-        BOOL ok=Put(self.blur,@"inputRadius",@3) && Put(self.blur,@"inputNormalizeEdges",@YES)
+        BOOL ok=Put(self.blur,@"inputRadius",@2) && Put(self.blur,@"inputNormalizeEdges",@YES)
             && Put(self.backdrop,@"windowServerAware",@YES)
             && Put(self.backdrop,@"allowsInPlaceFiltering",@NO);
         if(!ok) {self.backdrop=nil;return self;}
@@ -91,7 +91,7 @@ static CGImageRef Mask(size_t w, size_t h) {
 -(void)updateDimming {
     BOOL dark=[[self.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] isEqualToString:NSAppearanceNameDarkAqua];
     [CATransaction begin];[CATransaction setDisableActions:YES];
-    self.dimming.backgroundColor=[NSColor colorWithWhite:0 alpha:dark ? 0.30 : 0.10].CGColor;
+    self.dimming.backgroundColor=[NSColor colorWithWhite:0 alpha:dark ? 0.18 : 0.06].CGColor;
     [CATransaction commit];
 }
 -(void)viewDidChangeEffectiveAppearance {
