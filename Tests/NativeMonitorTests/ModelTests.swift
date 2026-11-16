@@ -35,11 +35,11 @@ final class ModelTests: XCTestCase {
         view.appearance = NSAppearance(named: .aqua)
         view.layout()
         let dimming = try XCTUnwrap(view.layer?.sublayers?.last)
-        XCTAssertEqual(try XCTUnwrap(dimming.backgroundColor).alpha, 0.10, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(dimming.backgroundColor).alpha, 0.06, accuracy: 0.001)
         view.appearance = NSAppearance(named: .darkAqua)
-        XCTAssertEqual(try XCTUnwrap(dimming.backgroundColor).alpha, 0.30, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(dimming.backgroundColor).alpha, 0.18, accuracy: 0.001)
         view.appearance = NSAppearance(named: .aqua)
-        XCTAssertEqual(try XCTUnwrap(dimming.backgroundColor).alpha, 0.10, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(dimming.backgroundColor).alpha, 0.06, accuracy: 0.001)
         XCTAssertFalse(dimming.isHidden)
         let contents = try XCTUnwrap(dimming.mask?.contents)
         XCTAssertEqual(CFGetTypeID(contents as CFTypeRef), CGImage.typeID)
@@ -173,8 +173,84 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(snapshot.rows.first(where: { $0.label.contains("峰值") })?.value, "15 MB/s")
         snapshot.current = nil
         XCTAssertTrue(snapshot.samples(.short).isEmpty)
+        XCTAssertEqual(snapshot.maximum(.short), 0.001)
         XCTAssertNil(snapshot.value)
     }
+    func testChartReductionPreservesExtremaEndpointsAndOrder() {
+        let samples: [Sample] = (0..<1000).map { index in
+            let value: Double = index == 337 ? 10_000 : (index == 338 ? -100 : 5)
+            return Sample(id: Double(index), minute: Double(index), value: value)
+        }
+        for limit in [4, 5, 160, 480] {
+            let reduced = Sample.reduced(samples, limit: limit)
+            XCTAssertLessThanOrEqual(reduced.count, limit)
+            XCTAssertEqual(reduced.first, samples.first)
+            XCTAssertEqual(reduced.last, samples.last)
+            XCTAssertEqual(reduced.map(\.value).max(), 10_000)
+            XCTAssertEqual(reduced.map(\.value).min(), -100)
+            XCTAssertEqual(reduced.map(\.id), reduced.map(\.id).sorted())
+            XCTAssertEqual(Set(reduced.map(\.id)).count, reduced.count)
+        }
+        XCTAssertEqual(Sample.reduced([], limit: 4), [])
+        XCTAssertEqual(Sample.reduced(Array(samples.prefix(3)), limit: 4), Array(samples.prefix(3)))
+        let flat = samples.map { Sample(id: $0.id, minute: $0.minute, value: 1) }
+        XCTAssertEqual(Sample.reduced(flat, limit: 160).last, flat.last)
+    }
+
+    func testFullDayChartsStayBoundedWithoutChangingStatistics() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let history = (0...86_400).map { index in
+            let value = index == 86_399 ? 10_000.0 : Double(index % 100)
+            return TimedValue(date: now.addingTimeInterval(Double(index - 86_400)), value: value,
+                              series: ["读取": value, "写入": Double(index % 50)])
+        }
+        let reading = MetricReading(date: now, value: 0, status: "", facts: [], rows: [])
+        let snapshot = Snapshot(metric: .disk, current: reading, history: history, now: now)
+        let started = Date()
+        for range in HistoryRange.allCases {
+            let samples = snapshot.samples(range, limit: 160)
+            XCTAssertLessThanOrEqual(samples.count, 160)
+            XCTAssertEqual(samples.first?.minute, -Double(range.rawValue))
+            XCTAssertEqual(samples.last?.minute, 0)
+            XCTAssertEqual(samples.map(\.value).max(), 10_000)
+            let points = snapshot.seriesSamples(range, limit: 480)
+            for name in ["读取", "写入"] {
+                let series = points.filter { $0.name == name }
+                XCTAssertLessThanOrEqual(series.count, 480)
+                XCTAssertEqual(series.first?.minute, -Double(range.rawValue))
+                XCTAssertEqual(series.last?.minute, 0)
+            }
+            XCTAssertEqual(snapshot.maximum(range), 12_000)
+        }
+        print("一天历史、五种范围的绘图数据准备耗时：\(Date().timeIntervalSince(started)) 秒")
+        let rawValues = snapshot.samples(.long).map(\.value)
+        XCTAssertEqual(rawValues.count, 1801)
+        let average = rawValues.reduce(0, +) / Double(rawValues.count)
+        XCTAssertEqual(snapshot.rows.first { $0.label.contains("均值") }?.value,
+                       ValueFormat.reading(average, metric: .disk, precision: 1))
+        XCTAssertEqual(snapshot.history.count, 86_401)
+    }
+
+    func testReducedSeriesKeepGapsAndLatestAfterManySegments() {
+        let now = Date(timeIntervalSince1970: 1000)
+        let history: [TimedValue] = (0...100).map { index in
+            let series: [String: Double] = index % 2 == 0 ? ["设备": Double(index)] : [:]
+            return TimedValue(date: now.addingTimeInterval(Double(index - 100)),
+                              value: Double(index), series: series)
+        }
+        let reading = MetricReading(date: now, value: 100, status: "", facts: [], rows: [])
+        let snapshot = Snapshot(metric: .gpu, current: reading, history: history, now: now)
+        let points = snapshot.seriesSamples(.short, limit: 4)
+        XCTAssertEqual(points.count, 51)
+        XCTAssertEqual(Set(points.map(\.segment)).count, 51)
+        XCTAssertEqual(points.last?.value, 100)
+        XCTAssertEqual(points.map(\.minute), points.map(\.minute).sorted())
+        var unavailable = snapshot
+        unavailable.current = nil
+        XCTAssertTrue(unavailable.seriesSamples(.short, limit: 4).isEmpty)
+        XCTAssertTrue(unavailable.samples(.short, limit: 4).isEmpty)
+    }
+
     func testExtendedHistoryRanges() {
         let now = Date(timeIntervalSince1970: 100_000)
         let reading = MetricReading(date: now, value: 1, status: "", facts: [], rows: [])

@@ -25,6 +25,29 @@ enum HistoryRange: Int, CaseIterable, Identifiable {
     var label: String { rawValue < 60 ? "\(rawValue) 分钟" : "\(rawValue / 60) 小时" }
 }
 struct Sample: Identifiable, Equatable { let id: Double; let minute: Double; let value: Double }
+// 仅压缩绘图数据；每桶保留峰谷及首尾，统计继续使用原始样本。
+extension Sample {
+    static func reduced(_ samples: [Sample], limit: Int) -> [Sample] {
+        precondition(limit >= 4)
+        guard samples.count > limit else { return samples }
+        let buckets = (limit - 2) / 2
+        var result = [samples[0]]
+        result.reserveCapacity(limit)
+        for bucket in 0..<buckets {
+            let start = 1 + bucket * (samples.count - 2) / buckets
+            let end = 1 + (bucket + 1) * (samples.count - 2) / buckets
+            var minimum = start, maximum = start
+            for index in start..<end {
+                if samples[index].value < samples[minimum].value { minimum = index }
+                if samples[index].value > samples[maximum].value { maximum = index }
+            }
+            result.append(samples[min(minimum, maximum)])
+            if minimum != maximum { result.append(samples[max(minimum, maximum)]) }
+        }
+        result.append(samples[samples.count - 1])
+        return result
+    }
+}
 struct Fact: Identifiable { let label: String; let value: String; var id: String { label } }
 struct TimedValue { let date: Date; let value: Double; var series: [String: Double] = [:] }
 struct LinePoint: Identifiable {
@@ -96,7 +119,13 @@ struct Snapshot {
     func maximum(_ range: HistoryRange) -> Double {
         if metric == .cpu { return Double(max(current?.cores.count ?? 0, 1)) * 100 * cpuFactor }
         if metric == .gpu { return 100 }
-        return max(0.001, max(samples(range).map(\.value).max() ?? 0, seriesSamples(range).map(\.value).max() ?? 0, value ?? 0) * 1.2)
+        guard value != nil else { return 0.001 }
+        var peak = value ?? 0
+        for item in history where isVisible(item, in: range) {
+            peak = max(peak, item.value * cpuFactor)
+            for value in item.series.values { peak = max(peak, value * cpuFactor) }
+        }
+        return max(0.001, peak * 1.2)
     }
     var note: String {
         switch metric {
@@ -108,35 +137,50 @@ struct Snapshot {
         case .network: "速率为处于运行状态的 en 接口接收或发送字节之和，包含本地网络流量；不统计 VPN、虚拟及其他名称接口，不能视为互联网流量。接口变化时重新建立速率基线。"
         }
     }
-    func seriesSamples(_ range: HistoryRange) -> [LinePoint] {
+    private func isVisible(_ item: TimedValue, in range: HistoryRange) -> Bool {
+        let age = now.timeIntervalSince(item.date)
+        return age >= 0 && age <= Double(range.rawValue * 60)
+    }
+    func seriesSamples(_ range: HistoryRange, limit: Int? = nil) -> [LinePoint] {
         guard value != nil else { return [] }
         var segments: [String: Int] = [:], active = Set<String>()
-        var points: [LinePoint] = []
-        for item in history {
+        var series: [String: [Sample]] = [:]
+        var names: [String: String] = [:]
+        for item in history where isVisible(item, in: range) {
             let minute = item.date.timeIntervalSince(now) / 60
-            guard minute >= -Double(range.rawValue), minute <= 0 else { continue }
-            let names = Set(item.series.keys)
-            for name in active.subtracting(names) { segments[name, default: 0] += 1 }
+            let currentNames = Set(item.series.keys)
+            for name in active.subtracting(currentNames) { segments[name, default: 0] += 1 }
             for (name, value) in item.series {
                 let segment = "\(name)-\(segments[name, default: 0])"
-                points.append(LinePoint(name: name, segment: segment, minute: minute,
-                                        value: value * cpuFactor, id: "\(segment)-\(item.date.timeIntervalSinceReferenceDate)"))
+                names[segment] = name
+                series[segment, default: []].append(Sample(id: item.date.timeIntervalSinceReferenceDate,
+                                                          minute: minute, value: value * cpuFactor))
             }
-            active = names
+            active = currentNames
         }
-        return points
+        // 分段后再压缩，避免将缺失前后的曲线接起来；只为最终绘图点构造标识符。
+        return series.keys.sorted().flatMap { segment -> [LinePoint] in
+            let samples = series[segment]!
+            return (limit.map { Sample.reduced(samples, limit: $0) } ?? samples).map {
+                LinePoint(name: names[segment]!, segment: segment, minute: $0.minute,
+                          value: $0.value, id: "\(segment)-\($0.id)")
+            }
+        }.sorted { $0.minute < $1.minute }
     }
     func plotStart(_ range: HistoryRange) -> Double {
-        guard let first = samples(range).first else { return -Double(range.rawValue) }
-        return min(-1.0 / 6, first.minute)
-    }
-    func samples(_ range: HistoryRange) -> [Sample] {
-        guard value != nil else { return [] }
-        return history.compactMap { item in
-            let minute = item.date.timeIntervalSince(now) / 60
-            guard minute >= -Double(range.rawValue), minute <= 0 else { return nil }
-            return Sample(id: item.date.timeIntervalSinceReferenceDate, minute: minute, value: item.value * cpuFactor)
+        guard value != nil, let first = history.first(where: { isVisible($0, in: range) }) else {
+            return -Double(range.rawValue)
         }
+        return min(-1.0 / 6, first.date.timeIntervalSince(now) / 60)
+    }
+    func samples(_ range: HistoryRange, limit: Int? = nil) -> [Sample] {
+        guard value != nil else { return [] }
+        let samples = history.compactMap { item -> Sample? in
+            guard isVisible(item, in: range) else { return nil }
+            return Sample(id: item.date.timeIntervalSinceReferenceDate,
+                          minute: item.date.timeIntervalSince(now) / 60, value: item.value * cpuFactor)
+        }
+        return limit.map { Sample.reduced(samples, limit: $0) } ?? samples
     }
 }
 

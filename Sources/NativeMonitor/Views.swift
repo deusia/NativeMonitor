@@ -139,7 +139,9 @@ struct Trend: View {
     var mini = false
     @State private var revealed = false
     var body: some View {
-        let samples = snapshot.samples(range)
+        let samples = snapshot.samples(range, limit: mini ? 160 : 480)
+        let plotStart = snapshot.plotStart(range)
+        let maximum = snapshot.maximum(range)
         Group {
             if let reason = snapshot.missingReason {
                 Text(reason).font(.system(size: mini ? 11 : 13)).foregroundStyle(.secondary)
@@ -162,12 +164,14 @@ struct Trend: View {
                         .foregroundStyle(chartColor).symbolSize(mini ? 9 : 24)
                 }
                 }
-                .chartXScale(domain: snapshot.plotStart(range)...0)
-                .chartYScale(domain: 0...snapshot.maximum(range))
+                // 范围切换和实时采样直接更新曲线，避免逐点插值阻塞滚动。
+                .transaction { $0.animation = nil }
+                .chartXScale(domain: plotStart...0)
+                .chartYScale(domain: 0...maximum)
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     if !mini {
-                        AxisMarks(position: .leading, values: [0, snapshot.maximum(range) / 2, snapshot.maximum(range)]) { value in
+                        AxisMarks(position: .leading, values: [0, maximum / 2, maximum]) { value in
                             AxisGridLine().foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.22) : Color.secondary.opacity(0.15))
                             AxisValueLabel {
                                 if let number = value.as(Double.self) {
@@ -187,7 +191,7 @@ struct Trend: View {
                 .onDisappear { revealed = false }
                 if !mini {
                     HStack {
-                        Text(snapshot.plotStart(range) <= -1 ? "−\((-snapshot.plotStart(range)).formatted(.number.precision(.fractionLength(0...1)))) 分钟" : "−\(Int(-snapshot.plotStart(range) * 60)) 秒")
+                        Text(plotStart <= -1 ? "−\((-plotStart).formatted(.number.precision(.fractionLength(0...1)))) 分钟" : "−\(Int(-plotStart * 60)) 秒")
                         Spacer()
                         Text("现在")
                     }.font(.system(size: 10)).foregroundStyle(colorScheme == .dark ? .primary : .secondary)
@@ -195,7 +199,6 @@ struct Trend: View {
                 }
             }
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: samples)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.label)，\(snapshot.missingReason ?? snapshot.reading)")
     }
@@ -207,7 +210,9 @@ struct DetailSeriesChart: View {
         "渲染器": .purple, "分块器": .orange, "活跃": .blue, "不可换出": .orange,
         "压缩": .purple, "非活跃": .teal, "空闲": .green, "读取": .blue, "写入": .orange, "接收": .blue, "发送": .orange]
     var body: some View {
-        let points = snapshot.seriesSamples(range)
+        let points = snapshot.seriesSamples(range, limit: 480)
+        let plotStart = snapshot.plotStart(range)
+        let maximum = snapshot.maximum(range)
         let names = Array(Set(points.map(\.name))).sorted()
         VStack(alignment: .leading, spacing: 12) {
             Label("分项趋势", systemImage: "chart.xyaxis.line").font(.headline)
@@ -232,11 +237,12 @@ struct DetailSeriesChart: View {
                         }
                     }
                 }
-                .chartXScale(domain: snapshot.plotStart(range)...0)
-                .chartYScale(domain: 0...snapshot.maximum(range))
+                .transaction { $0.animation = nil }
+                .chartXScale(domain: plotStart...0)
+                .chartYScale(domain: 0...maximum)
                 .chartXAxis(.hidden)
                 .chartYAxis {
-                    AxisMarks(position: .leading, values: [0, snapshot.maximum(range) / 2, snapshot.maximum(range)]) { value in
+                    AxisMarks(position: .leading, values: [0, maximum / 2, maximum]) { value in
                         AxisGridLine()
                         AxisValueLabel {
                             if let number = value.as(Double.self) { Text(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)) }
@@ -262,7 +268,8 @@ struct MemorySeriesCharts: View {
     let reduce: Bool
     private let names = ["活跃", "非活跃", "不可换出", "压缩", "空闲"]
     var body: some View {
-        let points = snapshot.seriesSamples(range)
+        let points = snapshot.seriesSamples(range, limit: 480)
+        let plotStart = snapshot.plotStart(range)
         VStack(alignment: .leading, spacing: 12) {
             Label("内存分项趋势", systemImage: "chart.xyaxis.line").font(.headline)
             Text("各图纵轴独立缩放，刻度单位为 GB；高度不能直接比较。")
@@ -298,7 +305,8 @@ struct MemorySeriesCharts: View {
                                         PointMark(x: .value("时间", latest.minute), y: .value("GB", latest.value)).symbolSize(20).foregroundStyle(color)
                                     }
                                 }
-                                .chartXScale(domain: snapshot.plotStart(range)...0)
+                                .transaction { $0.animation = nil }
+                                .chartXScale(domain: plotStart...0)
                                 .chartYScale(domain: scale)
                                 .chartXAxis(.hidden)
                                 .chartYAxis {
