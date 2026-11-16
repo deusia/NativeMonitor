@@ -2,8 +2,31 @@ import AppKit
 import SwiftUI
 import Combine
 
+final class StatusReadoutValue: ObservableObject {
+    @Published var text = "—"
+}
+
+struct StatusReadoutText: View {
+    @ObservedObject var reading: StatusReadoutValue
+    let alignment: Alignment
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Text(reading.text)
+            .font(.system(size: 11, weight: .medium)).monospacedDigit()
+            .contentTransition(.numericText())
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+            .clipped()
+            .transaction { if reduceMotion { $0.animation = nil } }
+            .accessibilityHidden(true)
+    }
+}
+
 final class StatusReadout: NSStackView {
-    private let fields = (0..<3).map { _ in NSTextField(labelWithString: "—") }
+    static let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+    private let fields = (0..<3).map { index in
+        NSHostingView(rootView: StatusReadoutText(reading: StatusReadoutValue(), alignment: index == 2 ? .leading : .trailing))
+    }
     private var widths: [NSLayoutConstraint] = []
     private var configuration: (scale: CPUScale, precision: Int)?
 
@@ -11,18 +34,16 @@ final class StatusReadout: NSStackView {
         super.init(frame: .zero)
         orientation = .horizontal
         spacing = 4
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         for field in fields {
-            field.font = font
-            field.alignment = .right
+            // SwiftUI 只绘制数字，尺寸仍由原生约束控制，避免动画撑动菜单栏。
+            field.sizingOptions = []
+            field.heightAnchor.constraint(equalToConstant: 16).isActive = true
             field.setAccessibilityElement(false)
             addArrangedSubview(field)
             let width = field.widthAnchor.constraint(equalToConstant: 0)
             width.isActive = true
             widths.append(width)
         }
-        // 接收速率从列首开始显示，避免短读数左侧出现大片空白。
-        fields[2].alignment = .left
         _ = configure(cpuScale: cpuScale, precision: precision)
     }
 
@@ -42,7 +63,7 @@ final class StatusReadout: NSStackView {
         let minimum = ValueFormat.number(0.0001, precision: digits)
         let references = [[cpu, minimum + "%"], [memory, minimum + "G"], rates]
         for (index, samples) in references.enumerated() {
-            let font = fields[index].font!
+            let font = Self.font
             let width = samples.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
             widths[index].constant = ceil(width) + 2
         }
@@ -54,7 +75,14 @@ final class StatusReadout: NSStackView {
 
     @discardableResult func update(_ values: [String], cpuScale: CPUScale, precision: Int) -> Bool {
         let changed = configure(cpuScale: cpuScale, precision: precision)
-        for (field, value) in zip(fields, values) where field.stringValue != value { field.stringValue = value }
+        for (field, value) in zip(fields, values) {
+            let reading = field.rootView.reading
+            guard reading.text != value else { continue }
+            // 首次读数、缺失值和设置切换直接替换，正常采样才播放数字过渡。
+            let animate = !changed && !reading.text.contains("—") && !value.contains("—")
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            withAnimation(animate ? .easeOut(duration: 0.22) : nil) { reading.text = value }
+        }
         return changed
     }
 
