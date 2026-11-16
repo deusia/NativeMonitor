@@ -94,6 +94,8 @@ struct LinePoint: Identifiable {
     let minute: Double
     let value: Double
     let id: String
+    // 只在绘图坐标中将下载映射到零线下方，原始速率仍保持非负。
+    func plotValue(for metric: Metric) -> Double { metric == .network && name == "接收" ? -value : value }
 }
 enum MemoryTrendScale {
     static func domain(_ values: [Double]) -> ClosedRange<Double> {

@@ -736,6 +736,13 @@ final class ModelTests: XCTestCase {
             XCTAssertEqual(points.filter { $0.name == "接收" }.map(\.value), [1, 2, 3])
             let upload = points.filter { $0.name == "发送" }
             XCTAssertEqual(upload.map(\.value), [20, 40])
+            XCTAssertEqual(upload.map { $0.plotValue(for: .network) }, [20, 40])
+            let download = points.filter { $0.name == "接收" }
+            XCTAssertEqual(download.map { $0.plotValue(for: .network) }, [-1, -2, -3])
+            XCTAssertEqual(download.map { $0.plotValue(for: .disk) }, [1, 2, 3])
+            XCTAssertTrue(chartAxisReading(-20, snapshot: snapshot).hasPrefix("↓ "))
+            XCTAssertTrue(chartAxisReading(20, snapshot: snapshot).hasPrefix("↑ "))
+            XCTAssertFalse(chartAxisReading(-20, snapshot: snapshot).contains("-"))
             XCTAssertEqual(Set(upload.map(\.segment)).count, 2)
             XCTAssertGreaterThan(snapshot.maximum(.short), 40)
         }

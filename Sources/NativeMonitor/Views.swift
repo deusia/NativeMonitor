@@ -230,6 +230,13 @@ struct MonitorSettings: View {
         }
     }
 }
+// 网络图坐标正负表示方向，刻度仍展示实际速率的绝对值。
+func chartAxisReading(_ value: Double, snapshot: Snapshot) -> String {
+    let direction = snapshot.metric == .network ? (value < 0 ? "↓ " : value > 0 ? "↑ " : "") : ""
+    return direction + ValueFormat.reading(snapshot.metric == .network ? abs(value) : value,
+                                         metric: snapshot.metric, precision: snapshot.precision)
+}
+
 struct Trend: View, Equatable {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -252,9 +259,13 @@ struct Trend: View, Equatable {
             } else {
                 VStack(spacing: 8) {
                 Chart {
+                    if snapshot.metric == .network {
+                        RuleMark(y: .value("零线", 0)).foregroundStyle(.secondary.opacity(0.6))
+                        RuleMark(x: .value("起点", plotStart)).foregroundStyle(.secondary.opacity(0.6))
+                    }
                 // 网络使用独立的接收／发送序列，沿用分段标识以保留缺失断点。
                 ForEach(networkPoints) { point in
-                    LineMark(x: .value("分钟", point.minute), y: .value("MB/s", point.value), series: .value("连续区间", point.segment))
+                    LineMark(x: .value("分钟", point.minute), y: .value("MB/s", point.plotValue(for: .network)), series: .value("连续区间", point.segment))
                         .interpolationMethod(.monotone)
                         .foregroundStyle(DetailSeriesChart.colors[point.name] ?? .gray)
                         .lineStyle(StrokeStyle(lineWidth: mini ? 1.5 : 2))
@@ -262,7 +273,7 @@ struct Trend: View, Equatable {
                 if snapshot.metric == .network {
                     ForEach(["接收", "发送"], id: \.self) { name in
                         if let latest = networkPoints.last(where: { $0.name == name }) {
-                            PointMark(x: .value("分钟", latest.minute), y: .value("MB/s", latest.value))
+                            PointMark(x: .value("分钟", latest.minute), y: .value("MB/s", latest.plotValue(for: .network)))
                                 .foregroundStyle(DetailSeriesChart.colors[name] ?? .gray).symbolSize(mini ? 9 : 24)
                         }
                     }
@@ -286,15 +297,15 @@ struct Trend: View, Equatable {
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: snapshot.current?.date)
                 .animation(nil, value: range)
                 .chartXScale(domain: plotStart...0)
-                .chartYScale(domain: 0...maximum)
+                .chartYScale(domain: (snapshot.metric == .network ? -maximum : 0)...maximum)
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     if !mini {
-                        AxisMarks(position: .leading, values: [0, maximum / 2, maximum]) { value in
+                        AxisMarks(position: .leading, values: snapshot.metric == .network ? [-maximum, -maximum / 2, 0, maximum / 2, maximum] : [0, maximum / 2, maximum]) { value in
                             AxisGridLine().foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.22) : Color.secondary.opacity(0.15))
                             AxisValueLabel {
                                 if let number = value.as(Double.self) {
-                                    NumericReadout(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)).foregroundStyle(.primary)
+                                    NumericReadout(chartAxisReading(number, snapshot: snapshot)).foregroundStyle(.primary)
                                 }
                             }
                         }
@@ -318,7 +329,7 @@ struct Trend: View, Equatable {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.label)，\(snapshot.missingReason ?? snapshot.reading)\(snapshot.metric == .network ? "，蓝线下载，红线上传" : "")")
+        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.label)，\(snapshot.missingReason ?? snapshot.reading)\(snapshot.metric == .network ? "，零线上方红线上传，零线下方蓝线下载" : "")")
     }
 }
 struct DetailSeriesChart: View, Equatable {
@@ -342,19 +353,23 @@ struct DetailSeriesChart: View, Equatable {
                 Text(snapshot.missingReason ?? "等待分项样本").foregroundStyle(.secondary).frame(height: 80)
             } else {
                 Chart {
+                    if snapshot.metric == .network {
+                        RuleMark(y: .value("零线", 0)).foregroundStyle(.secondary.opacity(0.6))
+                        RuleMark(x: .value("起点", plotStart)).foregroundStyle(.secondary.opacity(0.6))
+                    }
                     ForEach(points) { point in
                         let color = Self.colors[point.name] ?? .gray
-                        AreaMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment), stacking: .unstacked)
+                        AreaMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.plotValue(for: snapshot.metric)), series: .value("连续区间", point.segment), stacking: .unstacked)
                             .interpolationMethod(.monotone)
                             .foregroundStyle(LinearGradient(colors: [color.opacity(snapshot.metric == .memory ? 0.10 : 0.18), color.opacity(0.01)], startPoint: .top, endPoint: .bottom))
-                        LineMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.value), series: .value("连续区间", point.segment))
+                        LineMark(x: .value("时间", point.minute), y: .value(snapshot.metric.unit, point.plotValue(for: snapshot.metric)), series: .value("连续区间", point.segment))
                             .interpolationMethod(.monotone)
                             .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                             .foregroundStyle(color)
                     }
                     ForEach(names, id: \.self) { name in
                         if let latest = points.last(where: { $0.name == name }) {
-                            PointMark(x: .value("时间", latest.minute), y: .value(snapshot.metric.unit, latest.value))
+                            PointMark(x: .value("时间", latest.minute), y: .value(snapshot.metric.unit, latest.plotValue(for: snapshot.metric)))
                                 .symbolSize(22).foregroundStyle(Self.colors[name] ?? .gray)
                         }
                     }
@@ -362,13 +377,13 @@ struct DetailSeriesChart: View, Equatable {
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: snapshot.current?.date)
                 .animation(nil, value: range)
                 .chartXScale(domain: plotStart...0)
-                .chartYScale(domain: 0...maximum)
+                .chartYScale(domain: (snapshot.metric == .network ? -maximum : 0)...maximum)
                 .chartXAxis(.hidden)
                 .chartYAxis {
-                    AxisMarks(position: .leading, values: [0, maximum / 2, maximum]) { value in
+                    AxisMarks(position: .leading, values: snapshot.metric == .network ? [-maximum, -maximum / 2, 0, maximum / 2, maximum] : [0, maximum / 2, maximum]) { value in
                         AxisGridLine()
                         AxisValueLabel {
-                            if let number = value.as(Double.self) { NumericReadout(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)) }
+                            if let number = value.as(Double.self) { NumericReadout(chartAxisReading(number, snapshot: snapshot)) }
                         }
                     }
                 }
@@ -581,7 +596,7 @@ struct Overview: View {
                     Spacer(minLength: 0)
                 }
                 Text(snapshot.status).font(.system(size: 11)).lineLimit(2)
-                Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: metric == .network ? 45 : 25)
+                Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: metric == .network ? 65 : 25)
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(RoundedRectangle(cornerRadius: 22))
         }.modifier(GlassButton(reduce: model.reduceTransparency, card: true))
@@ -997,7 +1012,7 @@ struct Details: View {
                         VStack(alignment: .leading, spacing: 9) {
                             Text(metric.rawValue).font(.caption).foregroundStyle(.primary)
                             NumericReadout(snapshot.reading).font(.system(size: 14, weight: .medium)).monospacedDigit()
-                            Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: metric == .network ? 45 : 25)
+                            Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: metric == .network ? 65 : 25)
                         }.padding(11).frame(maxWidth: .infinity, alignment: .leading)
                             .background(model.metric == metric ? metricColor.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain).accessibilityLabel("对照\(metric.rawValue)，\(snapshot.reading)")
