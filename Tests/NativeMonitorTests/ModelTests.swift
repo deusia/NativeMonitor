@@ -721,6 +721,26 @@ final class ModelTests: XCTestCase {
         }
         XCTAssertNil(GPUCapabilities.coreCount(from: ["num_cores": 40, "num_mgpus": 1, "core_mask_list": [0]]))
     }
+    func testNetworkChartsKeepUploadAndDownloadIndependent() {
+        let start = Date(timeIntervalSinceReferenceDate: 1000)
+        let history = [
+            TimedValue(date: start, value: 1, series: ["接收": 1, "发送": 20]),
+            TimedValue(date: start.addingTimeInterval(1), value: 2, series: ["接收": 2]),
+            TimedValue(date: start.addingTimeInterval(2), value: 3, series: ["接收": 3, "发送": 40])
+        ]
+        let current = MetricReading(date: start.addingTimeInterval(2), value: 3, status: "正常", facts: [], rows: [],
+                                    series: ["接收": 3, "发送": 40])
+        let snapshot = Snapshot(metric: .network, current: current, history: history, now: current.date)
+        for limit in [160, 480] {
+            let points = snapshot.seriesSamples(.short, limit: limit)
+            XCTAssertEqual(points.filter { $0.name == "接收" }.map(\.value), [1, 2, 3])
+            let upload = points.filter { $0.name == "发送" }
+            XCTAssertEqual(upload.map(\.value), [20, 40])
+            XCTAssertEqual(Set(upload.map(\.segment)).count, 2)
+            XCTAssertGreaterThan(snapshot.maximum(.short), 40)
+        }
+    }
+
     func testMemoryTrendScalesEachSeriesAndHandlesFlatValues() {
         let high = MemoryTrendScale.domain([14.8, 15.0])
         let low = MemoryTrendScale.domain([0.92, 1.03])

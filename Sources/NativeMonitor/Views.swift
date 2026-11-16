@@ -241,7 +241,8 @@ struct Trend: View, Equatable {
     let range: HistoryRange
     var mini = false
     var body: some View {
-        let samples = snapshot.samples(range, limit: mini ? 160 : 480)
+        let samples = snapshot.metric == .network ? [] : snapshot.samples(range, limit: mini ? 160 : 480)
+        let networkPoints = snapshot.metric == .network ? snapshot.seriesSamples(range, limit: mini ? 160 : 480) : []
         let plotStart = snapshot.plotStart(range)
         let maximum = snapshot.maximum(range)
         Group {
@@ -251,6 +252,21 @@ struct Trend: View, Equatable {
             } else {
                 VStack(spacing: 8) {
                 Chart {
+                // 网络使用独立的接收／发送序列，沿用分段标识以保留缺失断点。
+                ForEach(networkPoints) { point in
+                    LineMark(x: .value("分钟", point.minute), y: .value("MB/s", point.value), series: .value("连续区间", point.segment))
+                        .interpolationMethod(.monotone)
+                        .foregroundStyle(DetailSeriesChart.colors[point.name] ?? .gray)
+                        .lineStyle(StrokeStyle(lineWidth: mini ? 1.5 : 2))
+                }
+                if snapshot.metric == .network {
+                    ForEach(["接收", "发送"], id: \.self) { name in
+                        if let latest = networkPoints.last(where: { $0.name == name }) {
+                            PointMark(x: .value("分钟", latest.minute), y: .value("MB/s", latest.value))
+                                .foregroundStyle(DetailSeriesChart.colors[name] ?? .gray).symbolSize(mini ? 9 : 24)
+                        }
+                    }
+                }
                 ForEach(samples) { sample in
                     AreaMark(x: .value("分钟", sample.minute), y: .value(snapshot.metric.unit, sample.value))
                         .interpolationMethod(.monotone)
@@ -285,6 +301,12 @@ struct Trend: View, Equatable {
                     }
                 }
                 .padding(.vertical, mini ? 0 : 8)
+                if snapshot.metric == .network {
+                    HStack(spacing: 12) {
+                        Label("下载", systemImage: "arrow.down").foregroundStyle(.blue)
+                        Label("上传", systemImage: "arrow.up").foregroundStyle(.red)
+                    }.font(.system(size: mini ? 9 : 11))
+                }
                 if !mini {
                     HStack {
                         NumericReadout(plotStart <= -1 ? "−\((-plotStart).formatted(.number.precision(.fractionLength(0...1)))) 分钟" : "−\(Int(-plotStart * 60)) 秒")
@@ -296,7 +318,7 @@ struct Trend: View, Equatable {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.label)，\(snapshot.missingReason ?? snapshot.reading)")
+        .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.label)，\(snapshot.missingReason ?? snapshot.reading)\(snapshot.metric == .network ? "，蓝线下载，红线上传" : "")")
     }
 }
 struct DetailSeriesChart: View, Equatable {
@@ -308,7 +330,7 @@ struct DetailSeriesChart: View, Equatable {
     let range: HistoryRange
     static let colors: [String: Color] = ["用户": .blue, "系统": .orange, "设备": .blue,
         "渲染器": .purple, "分块器": .orange, "活跃": .blue, "不可换出": .orange,
-        "压缩": .purple, "非活跃": .teal, "空闲": .green, "读取": .blue, "写入": .orange, "接收": .blue, "发送": .orange]
+        "压缩": .purple, "非活跃": .teal, "空闲": .green, "读取": .blue, "写入": .orange, "接收": .blue, "发送": .red]
     var body: some View {
         let points = snapshot.seriesSamples(range, limit: 480)
         let plotStart = snapshot.plotStart(range)
@@ -354,7 +376,7 @@ struct DetailSeriesChart: View, Equatable {
                 .accessibilityLabel("\(snapshot.metric.rawValue)分项趋势，包含\(names.joined(separator: "、"))")
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), alignment: .leading)], alignment: .leading, spacing: 8) {
                     ForEach(names, id: \.self) { name in
-                        Label(name, systemImage: "circle.fill")
+                        Label(name == "接收" ? "下载（接收）" : name == "发送" ? "上传（发送）" : name, systemImage: "circle.fill")
                             .labelStyle(.titleAndIcon)
                             .foregroundStyle(Self.colors[name] ?? .gray)
                     }
@@ -559,7 +581,7 @@ struct Overview: View {
                     Spacer(minLength: 0)
                 }
                 Text(snapshot.status).font(.system(size: 11)).lineLimit(2)
-                Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: 25)
+                Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: metric == .network ? 45 : 25)
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(RoundedRectangle(cornerRadius: 22))
         }.modifier(GlassButton(reduce: model.reduceTransparency, card: true))
@@ -975,7 +997,7 @@ struct Details: View {
                         VStack(alignment: .leading, spacing: 9) {
                             Text(metric.rawValue).font(.caption).foregroundStyle(.primary)
                             NumericReadout(snapshot.reading).font(.system(size: 14, weight: .medium)).monospacedDigit()
-                            Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: 25)
+                            Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: metric == .network ? 45 : 25)
                         }.padding(11).frame(maxWidth: .infinity, alignment: .leading)
                             .background(model.metric == metric ? metricColor.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain).accessibilityLabel("对照\(metric.rawValue)，\(snapshot.reading)")
