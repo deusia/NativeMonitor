@@ -14,6 +14,23 @@ private final class DragProbeWindow: NSWindow {
     override func performDrag(with event: NSEvent) { dragCount += 1 }
 }
 final class ModelTests: XCTestCase {
+    @MainActor func testInvisibleDragAreaDoesNotExpandHeader() throws {
+        let suite = "NativeMonitorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = MonitorModel(defaults: defaults)
+        let host = NSHostingView(rootView: Details(model: model, showOverview: {}, close: {}))
+        host.frame = NSRect(x: 0, y: 0, width: 1000, height: 780)
+        host.layoutSubtreeIfNeeded()
+        func findDragArea(_ view: NSView) -> WindowDragView? {
+            if let area = view as? WindowDragView { return area }
+            return view.subviews.lazy.compactMap { findDragArea($0) }.first
+        }
+        let area = try XCTUnwrap(findDragArea(host))
+        XCTAssertGreaterThan(area.frame.width, 200)
+        XCTAssertEqual(area.frame.height, 36, accuracy: 1)
+    }
+
     @MainActor func testWindowDragAreaUsesNativeWindowDragging() throws {
         let window = DragProbeWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100),
                                      styleMask: [.borderless], backing: .buffered, defer: false)
