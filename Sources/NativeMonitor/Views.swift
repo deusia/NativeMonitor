@@ -231,6 +231,7 @@ struct MonitorSettings: View {
     }
 }
 struct Trend: View, Equatable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.range == rhs.range && lhs.mini == rhs.mini && lhs.snapshot.hasSameChart(as: rhs.snapshot)
     }
@@ -265,8 +266,9 @@ struct Trend: View, Equatable {
                         .foregroundStyle(chartColor).symbolSize(mini ? 9 : 24)
                 }
                 }
-                // 范围切换和实时采样直接更新曲线，避免逐点插值阻塞滚动。
-                .transaction { $0.animation = nil }
+                // 新采样平滑推进曲线和末端点；切换历史范围直接重设，避免跨范围插值。
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: snapshot.current?.date)
+                .animation(nil, value: range)
                 .chartXScale(domain: plotStart...0)
                 .chartYScale(domain: 0...maximum)
                 .chartXAxis(.hidden)
@@ -298,6 +300,7 @@ struct Trend: View, Equatable {
     }
 }
 struct DetailSeriesChart: View, Equatable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.range == rhs.range && lhs.snapshot.hasSameChart(as: rhs.snapshot)
     }
@@ -334,7 +337,8 @@ struct DetailSeriesChart: View, Equatable {
                         }
                     }
                 }
-                .transaction { $0.animation = nil }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: snapshot.current?.date)
+                .animation(nil, value: range)
                 .chartXScale(domain: plotStart...0)
                 .chartYScale(domain: 0...maximum)
                 .chartXAxis(.hidden)
@@ -360,6 +364,7 @@ struct DetailSeriesChart: View, Equatable {
     }
 }
 struct MemorySeriesCharts: View, Equatable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.range == rhs.range && lhs.reduce == rhs.reduce && lhs.snapshot.hasSameChart(as: rhs.snapshot)
     }
@@ -405,7 +410,8 @@ struct MemorySeriesCharts: View, Equatable {
                                         PointMark(x: .value("时间", latest.minute), y: .value("GB", latest.value)).symbolSize(20).foregroundStyle(color)
                                     }
                                 }
-                                .transaction { $0.animation = nil }
+                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: snapshot.current?.date)
+                                .animation(nil, value: range)
                                 .chartXScale(domain: plotStart...0)
                                 .chartYScale(domain: scale)
                                 .chartXAxis(.hidden)
@@ -924,6 +930,7 @@ struct Details: View {
                         NumericReadout(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit().fixedSize()
                     }
                     ProgressView(value: value ?? 0, total: 100).tint(color)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: value)
                 }.font(.caption).padding(10).frame(maxWidth: .infinity, minHeight: 64).modifier(ControlMaterial(region: .cards, reduce: model.reduceTransparency))
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
