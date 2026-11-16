@@ -4,33 +4,51 @@ import Combine
 
 final class StatusReadout: NSStackView {
     private let fields = (0..<3).map { _ in NSTextField(labelWithString: "—") }
+    private var widths: [NSLayoutConstraint] = []
 
-    init() {
+    init(cpuScale: CPUScale = .total, precision: Int = 1) {
         super.init(frame: .zero)
         orientation = .horizontal
-        spacing = 8
+        spacing = 4
         let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        // 按硬件上限和最高小数精度预留各列宽度，避免读数、精度及速率单位变化带动其他指标。
-        let cpu = ValueFormat.number(Double(ProcessInfo.processInfo.processorCount * 100) + 0.99, precision: 2) + "%"
-        let memory = ValueFormat.number(ValueFormat.memoryGigabytes(ProcessInfo.processInfo.physicalMemory) + 0.99, precision: 2) + "G"
-        let rates = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"].map {
-            "↓\(ValueFormat.number(1000.99, precision: 2)) \($0)"
-        }
-        let references = [[cpu, "<0.01%"], [memory, "<0.01G"], rates]
-        for (field, samples) in zip(fields, references) {
+        for field in fields {
             field.font = font
             field.alignment = .right
             field.setAccessibilityElement(false)
             addArrangedSubview(field)
+            let width = field.widthAnchor.constraint(equalToConstant: 0)
+            width.isActive = true
+            widths.append(width)
+        }
+        // 接收速率从列首开始显示，避免短读数左侧出现大片空白。
+        fields[2].alignment = .left
+        configure(cpuScale: cpuScale, precision: precision)
+    }
+
+    private func configure(cpuScale: CPUScale, precision: Int) {
+        let digits = max(0, min(2, precision))
+        // 只为当前设置预留空间；切换设置可以调整宽度，采样更新不能带动菜单栏移动。
+        let cpuMaximum = cpuScale == .average ? 100 : ProcessInfo.processInfo.processorCount * 100
+        let cpu = Double(cpuMaximum).formatted(.number.precision(.fractionLength(digits))) + "%"
+        let memory = ceil(ValueFormat.memoryGigabytes(ProcessInfo.processInfo.physicalMemory))
+            .formatted(.number.precision(.fractionLength(digits))) + "G"
+        let rates = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"].map {
+            "↓\(1000.0.formatted(.number.precision(.fractionLength(digits)))) \($0)"
+        }
+        let minimum = ValueFormat.number(0.0001, precision: digits)
+        let references = [[cpu, minimum + "%"], [memory, minimum + "G"], rates]
+        for (index, samples) in references.enumerated() {
+            let font = fields[index].font!
             let width = samples.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
-            field.widthAnchor.constraint(equalToConstant: ceil(width) + 2).isActive = true
+            widths[index].constant = ceil(width) + 2
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     // 文本只负责显示，让整个区域继续由原生菜单栏按钮处理点击和高亮。
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func update(_ values: [String]) {
+    func update(_ values: [String], cpuScale: CPUScale, precision: Int) {
+        configure(cpuScale: cpuScale, precision: precision)
         for (field, value) in zip(fields, values) { field.stringValue = value }
     }
 
@@ -64,7 +82,7 @@ final class OverviewPanel: NSPanel {
         super.init()
     }
     var status: NSStatusItem!
-    let statusReadout = StatusReadout()
+    lazy var statusReadout = StatusReadout(cpuScale: model.cpuScale, precision: model.precision)
     var overviewPanel: OverviewPanel!
     var outsideClickMonitor: Any?
     var localClickMonitor: Any?
@@ -218,7 +236,8 @@ final class OverviewPanel: NSPanel {
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(sender); return false }
     func updateStatus() {
         let values = StatusReadout.values(model)
-        statusReadout.update(values)
+        statusReadout.update(values, cpuScale: model.cpuScale, precision: model.precision)
+        status.length = statusReadout.fittingSize.width + 16
         status.button?.setAccessibilityValue(values.joined(separator: "  "))
         status.button?.toolTip = "CPU / 内存 / 接收"
     }
