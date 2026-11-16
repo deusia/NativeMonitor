@@ -568,11 +568,11 @@ struct Details: View {
                 if #available(macOS 26.0, *) {
                     ToolbarItem(placement: .navigation) { sidebarToggle }
                         .sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .primaryAction) { toolbarActions }
+                    ToolbarItemGroup(placement: .primaryAction) { toolbarActions }
                         .sharedBackgroundVisibility(.hidden)
                 } else {
                     ToolbarItem(placement: .navigation) { sidebarToggle }
-                    ToolbarItem(placement: .primaryAction) { toolbarActions }
+                    ToolbarItemGroup(placement: .primaryAction) { toolbarActions }
                 }
             }
         }
@@ -600,7 +600,7 @@ struct Details: View {
     }
 
     private var toolbarActions: some View {
-        HStack(spacing: 8) {
+        Group {
             Button(action: showOverview) {
                 Image(systemName: "menubar.rectangle").font(.system(size: 16)).frame(width: 28, height: 28)
             }
