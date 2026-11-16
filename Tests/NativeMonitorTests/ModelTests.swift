@@ -9,7 +9,25 @@ private struct MaterialContentProbe: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { created(); return NSView() }
     func updateNSView(_ view: NSView, context: Context) {}
 }
+private final class DragProbeWindow: NSWindow {
+    var dragCount = 0
+    override func performDrag(with event: NSEvent) { dragCount += 1 }
+}
 final class ModelTests: XCTestCase {
+    @MainActor func testWindowDragAreaUsesNativeWindowDragging() throws {
+        let window = DragProbeWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100),
+                                     styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let area = WindowDragView(frame: NSRect(x: 0, y: 0, width: 300, height: 36))
+        window.contentView = area
+        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 40, y: 18),
+            modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 0, clickCount: 1, pressure: 1))
+        XCTAssertTrue(area.acceptsFirstMouse(for: event))
+        area.mouseDown(with: event)
+        XCTAssertEqual(window.dragCount, 1)
+    }
+
     @MainActor func testStatusReadoutOnlyReconfiguresLayoutWhenSettingsChange() {
         let readout = StatusReadout(cpuScale: .average, precision: 0)
         XCTAssertFalse(readout.update(["9%", "10G", "↓0 B/s"], cpuScale: .average, precision: 0))

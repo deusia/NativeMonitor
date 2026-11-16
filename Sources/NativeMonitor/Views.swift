@@ -619,7 +619,12 @@ struct Details: View {
             HStack(spacing: 8) {
                 sidebarToggle
                 toolbarActions
-                Spacer(minLength: 0)
+                Label("拖动窗口", systemImage: "hand.draw")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .background(.primary.opacity(0.04), in: Capsule())
+                    .overlay { WindowDragArea() }
+                    .help("按住此处拖动窗口")
             }
             .padding(.horizontal, 10)
             .accessibilityElement(children: .contain)
@@ -713,7 +718,8 @@ struct Details: View {
 
         .padding(10)
         .frame(minWidth: 640, minHeight: 520)
-        .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, diagnostics: model.backdropDiagnostics, appearance: model.appearance[.details]))
+        .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, topPadding: 12, diagnostics: model.backdropDiagnostics, appearance: model.appearance[.details]))
+        .ignoresSafeArea(.container, edges: .top)
         .environment(\.monitorAppearance, model.appearance)
         .task(id: model.metric) {
             await pageTransition.show(model.metric, animated: !reduceMotion && model.detailsPresented)
