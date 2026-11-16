@@ -9,7 +9,42 @@ private struct MaterialContentProbe: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { created(); return NSView() }
     func updateNSView(_ view: NSView, context: Context) {}
 }
+private final class DragProbeWindow: NSWindow {
+    var dragCount = 0
+    override func performDrag(with event: NSEvent) { dragCount += 1 }
+}
 final class ModelTests: XCTestCase {
+    @MainActor func testInvisibleDragAreaDoesNotExpandHeader() throws {
+        let suite = "NativeMonitorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = MonitorModel(defaults: defaults)
+        let host = NSHostingView(rootView: Details(model: model, showOverview: {}, close: {}))
+        host.frame = NSRect(x: 0, y: 0, width: 1000, height: 780)
+        host.layoutSubtreeIfNeeded()
+        func findDragArea(_ view: NSView) -> WindowDragView? {
+            if let area = view as? WindowDragView { return area }
+            return view.subviews.lazy.compactMap { findDragArea($0) }.first
+        }
+        let area = try XCTUnwrap(findDragArea(host))
+        XCTAssertGreaterThan(area.frame.width, 200)
+        XCTAssertEqual(area.frame.height, 36, accuracy: 1)
+    }
+
+    @MainActor func testWindowDragAreaUsesNativeWindowDragging() throws {
+        let window = DragProbeWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100),
+                                     styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let area = WindowDragView(frame: NSRect(x: 0, y: 0, width: 300, height: 36))
+        window.contentView = area
+        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 40, y: 18),
+            modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 0, clickCount: 1, pressure: 1))
+        XCTAssertTrue(area.acceptsFirstMouse(for: event))
+        area.mouseDown(with: event)
+        XCTAssertEqual(window.dragCount, 1)
+    }
+
     @MainActor func testStatusReadoutOnlyReconfiguresLayoutWhenSettingsChange() {
         let readout = StatusReadout(cpuScale: .average, precision: 0)
         XCTAssertFalse(readout.update(["9%", "10G", "↓0 B/s"], cpuScale: .average, precision: 0))

@@ -54,6 +54,20 @@ struct GlassButton: ViewModifier {
     }
 }
 
+// 只动画格式化后的数字文本，不把采样动画传给图表、网格或整页布局。
+struct NumericReadout: View {
+    let text: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text).monospacedDigit()
+            .contentTransition(.numericText())
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: text)
+    }
+}
+
 struct PrivateRegionBackdrop: NSViewRepresentable {
     let presented: Bool
     let reduceMotion: Bool
@@ -207,7 +221,7 @@ struct MonitorSettings: View {
             HStack {
                 Text(title)
                 Spacer()
-                Text(title == "模糊度" ? "\(Int(value.wrappedValue)) pt" : "\(Int(value.wrappedValue * 100))%")
+                NumericReadout(title == "模糊度" ? "\(Int(value.wrappedValue)) pt" : "\(Int(value.wrappedValue * 100))%")
                     .monospacedDigit().foregroundStyle(.secondary)
             }
             Slider(value: value, in: range, step: title == "模糊度" ? 1 : 0.01) { Text("\(appearanceRegion.rawValue)\(title)") }
@@ -217,6 +231,7 @@ struct MonitorSettings: View {
     }
 }
 struct Trend: View, Equatable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.range == rhs.range && lhs.mini == rhs.mini && lhs.snapshot.hasSameChart(as: rhs.snapshot)
     }
@@ -251,8 +266,9 @@ struct Trend: View, Equatable {
                         .foregroundStyle(chartColor).symbolSize(mini ? 9 : 24)
                 }
                 }
-                // 范围切换和实时采样直接更新曲线，避免逐点插值阻塞滚动。
-                .transaction { $0.animation = nil }
+                // 新采样平滑推进曲线和末端点；切换历史范围直接重设，避免跨范围插值。
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: snapshot.current?.date)
+                .animation(nil, value: range)
                 .chartXScale(domain: plotStart...0)
                 .chartYScale(domain: 0...maximum)
                 .chartXAxis(.hidden)
@@ -262,7 +278,7 @@ struct Trend: View, Equatable {
                             AxisGridLine().foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.22) : Color.secondary.opacity(0.15))
                             AxisValueLabel {
                                 if let number = value.as(Double.self) {
-                                    Text(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)).foregroundStyle(.primary)
+                                    NumericReadout(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)).foregroundStyle(.primary)
                                 }
                             }
                         }
@@ -271,7 +287,7 @@ struct Trend: View, Equatable {
                 .padding(.vertical, mini ? 0 : 8)
                 if !mini {
                     HStack {
-                        Text(plotStart <= -1 ? "−\((-plotStart).formatted(.number.precision(.fractionLength(0...1)))) 分钟" : "−\(Int(-plotStart * 60)) 秒")
+                        NumericReadout(plotStart <= -1 ? "−\((-plotStart).formatted(.number.precision(.fractionLength(0...1)))) 分钟" : "−\(Int(-plotStart * 60)) 秒")
                         Spacer()
                         Text("现在")
                     }.font(.system(size: 10)).foregroundStyle(colorScheme == .dark ? .primary : .secondary)
@@ -284,6 +300,7 @@ struct Trend: View, Equatable {
     }
 }
 struct DetailSeriesChart: View, Equatable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.range == rhs.range && lhs.snapshot.hasSameChart(as: rhs.snapshot)
     }
@@ -320,7 +337,8 @@ struct DetailSeriesChart: View, Equatable {
                         }
                     }
                 }
-                .transaction { $0.animation = nil }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: snapshot.current?.date)
+                .animation(nil, value: range)
                 .chartXScale(domain: plotStart...0)
                 .chartYScale(domain: 0...maximum)
                 .chartXAxis(.hidden)
@@ -328,7 +346,7 @@ struct DetailSeriesChart: View, Equatable {
                     AxisMarks(position: .leading, values: [0, maximum / 2, maximum]) { value in
                         AxisGridLine()
                         AxisValueLabel {
-                            if let number = value.as(Double.self) { Text(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)) }
+                            if let number = value.as(Double.self) { NumericReadout(ValueFormat.reading(number, metric: snapshot.metric, precision: snapshot.precision)) }
                         }
                     }
                 }
@@ -346,6 +364,7 @@ struct DetailSeriesChart: View, Equatable {
     }
 }
 struct MemorySeriesCharts: View, Equatable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.range == rhs.range && lhs.reduce == rhs.reduce && lhs.snapshot.hasSameChart(as: rhs.snapshot)
     }
@@ -372,7 +391,7 @@ struct MemorySeriesCharts: View, Equatable {
                             HStack {
                                 Label(name, systemImage: "circle.fill").foregroundStyle(color)
                                 Spacer()
-                                Text(snapshot.current?.series[name].map { ValueFormat.reading($0, metric: .memory, precision: 2) } ?? "—")
+                                NumericReadout(snapshot.current?.series[name].map { ValueFormat.reading($0, metric: .memory, precision: 2) } ?? "—")
                                     .monospacedDigit()
                             }.font(.caption.weight(.medium))
                             if samples.isEmpty {
@@ -391,7 +410,8 @@ struct MemorySeriesCharts: View, Equatable {
                                         PointMark(x: .value("时间", latest.minute), y: .value("GB", latest.value)).symbolSize(20).foregroundStyle(color)
                                     }
                                 }
-                                .transaction { $0.animation = nil }
+                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: snapshot.current?.date)
+                                .animation(nil, value: range)
                                 .chartXScale(domain: plotStart...0)
                                 .chartYScale(domain: scale)
                                 .chartXAxis(.hidden)
@@ -400,7 +420,7 @@ struct MemorySeriesCharts: View, Equatable {
                                         AxisGridLine()
                                         AxisValueLabel {
                                             if let number = value.as(Double.self) {
-                                                Text(number.formatted(.number.precision(.fractionLength(2))))
+                                                NumericReadout(number.formatted(.number.precision(.fractionLength(2))))
                                             }
                                         }
                                     }
@@ -487,7 +507,6 @@ private struct GlassReveal: ViewModifier {
     }
 }
 struct Overview: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @ObservedObject var model: MonitorModel
     @State private var showSettings = false
@@ -535,9 +554,7 @@ struct Overview: View {
             VStack(alignment: .leading, spacing: 6) {
                 Label(metric.rawValue, systemImage: metric.symbol).font(.system(size: 12, weight: .medium))
                 HStack(alignment: .firstTextBaseline) {
-                    Text(snapshot.number).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
-                        .contentTransition(.numericText(value: snapshot.value ?? 0))
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: snapshot.value)
+                    NumericReadout(snapshot.number).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
                     if snapshot.value != nil { Text(snapshot.unit).font(.caption) }
                     Spacer(minLength: 0)
                 }
@@ -614,7 +631,20 @@ struct Details: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
+            // 系统窗口按钮已隐藏，操作区直接与内容对齐，不沿用原生工具栏的窗口按钮留白。
+            HStack(spacing: 8) {
+                sidebarToggle
+                toolbarActions
+                Color.clear
+                    .frame(height: 36).frame(maxWidth: .infinity)
+                    .overlay { WindowDragArea() }
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 10)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("窗口工具栏")
+            HStack(alignment: .top, spacing: 12) {
             if sidebarVisible {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -698,24 +728,13 @@ struct Details: View {
             .allowsHitTesting(pageTransition.visible)
             .modifier(ControlMaterial(region: .cards, cornerRadius: 24, materialOpacity: 0.65, reduce: model.reduceTransparency))
             .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.04))
-            .navigationTitle("性能监控")
-            .toolbar {
-                if #available(macOS 26.0, *) {
-                    ToolbarItem(placement: .navigation) { sidebarToggle }
-                        .sharedBackgroundVisibility(.hidden)
-                    ToolbarItemGroup(placement: .primaryAction) { toolbarActions }
-                        .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .navigation) { sidebarToggle }
-                    ToolbarItemGroup(placement: .primaryAction) { toolbarActions }
-                }
             }
         }
 
-        .toolbarBackground(.hidden, for: .windowToolbar)
         .padding(10)
         .frame(minWidth: 640, minHeight: 520)
-        .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, diagnostics: model.backdropDiagnostics, appearance: model.appearance[.details]))
+        .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, topPadding: 12, diagnostics: model.backdropDiagnostics, appearance: model.appearance[.details]))
+        .ignoresSafeArea(.container, edges: .top)
         .environment(\.monitorAppearance, model.appearance)
         .task(id: model.metric) {
             await pageTransition.show(model.metric, animated: !reduceMotion && model.detailsPresented)
@@ -790,9 +809,9 @@ struct Details: View {
                     ForEach([false, true], id: \.self) { gpu in
                         if let average = gpu ? gpuAverage : cpuAverage {
                             HStack {
-                                Text("\(gpu ? "GPU" : "CPU") · \(average.count) 个测点")
+                                NumericReadout("\(gpu ? "GPU" : "CPU") · \(average.count) 个测点")
                                 Spacer()
-                                Text("\(ValueFormat.number(average.value, precision: model.precision)) °C").monospacedDigit()
+                                NumericReadout("\(ValueFormat.number(average.value, precision: model.precision)) °C").monospacedDigit()
                             }.font(.callout)
                         }
                     }
@@ -803,19 +822,23 @@ struct Details: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()
-                DisclosureGroup("温度传感器 · \(temperatureCount) 项") {
+                DisclosureGroup {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("按系统键名前缀分组；测点名称为第三方参考，并非 Apple 官方定义。核心簇测点不一定对应单个核心；附近测点不一定是部件内部温度。")
                             .font(.caption).foregroundStyle(.secondary)
                         if groups.isEmpty { Text("未发现可读取的温度传感器").font(.callout).foregroundStyle(.secondary) }
                         ForEach(groups, id: \.key) { group in
-                            DisclosureGroup("\(group.key) 系列 · \(group.readings.count) 项") {
+                            DisclosureGroup {
                                 VStack(alignment: .leading, spacing: 10) {
                                     ForEach(group.readings) { sensor in sensorRow(sensor) }
                                 }.padding(.top, 10)
+                            } label: {
+                                NumericReadout("\(group.key) 系列 · \(group.readings.count) 项")
                             }
                         }
                     }.padding(.top, 12)
+                } label: {
+                    NumericReadout("温度传感器 · \(temperatureCount) 项")
                 }.font(.headline)
             }
             Text("数据来自 AppleSMC 私有接口，键名和可用项目因设备及系统版本而异；无风扇设备可能没有转速读数。")
@@ -826,7 +849,7 @@ struct Details: View {
         HStack {
             Text(sensor.displayName)
             Spacer()
-            Text("\(ValueFormat.number(sensor.value, precision: model.precision)) \(sensor.unit)").monospacedDigit()
+            NumericReadout("\(ValueFormat.number(sensor.value, precision: model.precision)) \(sensor.unit)").monospacedDigit()
         }.font(.callout)
     }
     private var hero: some View {
@@ -839,9 +862,7 @@ struct Details: View {
             }
             HStack(alignment: .bottom) {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text(snapshot.number).font(.system(size: 48, weight: .light, design: .rounded)).monospacedDigit()
-                        .contentTransition(.numericText(value: snapshot.value ?? 0))
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: snapshot.value)
+                    NumericReadout(snapshot.number).font(.system(size: 48, weight: .light, design: .rounded)).monospacedDigit()
                     if snapshot.value != nil { Text(snapshot.unit).font(.title3).foregroundStyle(.primary) }
                 }
                 Spacer()
@@ -857,7 +878,7 @@ struct Details: View {
             ForEach(model.snapshot(pageTransition.metric).facts) { fact in
                 VStack(alignment: .leading, spacing: 7) {
                     Text(fact.label).font(.caption).foregroundStyle(.primary)
-                    Text(fact.value).font(.system(size: 17, weight: .medium)).monospacedDigit()
+                    NumericReadout(fact.value).font(.system(size: 17, weight: .medium)).monospacedDigit()
                 }.padding(12).frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
                     .modifier(ControlMaterial(region: .cards, cornerRadius: 16, reduce: model.reduceTransparency))
             }
@@ -882,7 +903,7 @@ struct Details: View {
                             Text("\(sameKind ? kind! + " · " : "")簇 \(cluster.id)")
                                 .font(.subheadline.weight(.medium))
                             Spacer(minLength: 8)
-                            Text("\(cluster.indices.count) 核 · 总量 \(total.map { ValueFormat.number($0, precision: 1) + "%" } ?? "—") / \(cluster.indices.count * 100)% · 平均 \(total.map { ValueFormat.number($0 / Double(cluster.indices.count), precision: 1) + "%" } ?? "—")")
+                            NumericReadout("\(cluster.indices.count) 核 · 总量 \(total.map { ValueFormat.number($0, precision: 1) + "%" } ?? "—") / \(cluster.indices.count * 100)% · 平均 \(total.map { ValueFormat.number($0 / Double(cluster.indices.count), precision: 1) + "%" } ?? "—")")
                                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                                 .lineLimit(1).minimumScaleFactor(0.8)
                         }.padding(.vertical, 4)
@@ -906,9 +927,10 @@ struct Details: View {
                     HStack {
                         Text("\(kind ?? "核心") \(index + 1)").lineLimit(1).minimumScaleFactor(0.8)
                         Spacer(minLength: 4)
-                        Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit().fixedSize()
+                        NumericReadout(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit().fixedSize()
                     }
                     ProgressView(value: value ?? 0, total: 100).tint(color)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: value)
                 }.font(.caption).padding(10).frame(maxWidth: .infinity, minHeight: 64).modifier(ControlMaterial(region: .cards, reduce: model.reduceTransparency))
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
@@ -929,7 +951,7 @@ struct Details: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Apple Neural Engine", systemImage: "brain")
                     Text("独立神经网络引擎")
-                    Text(model.snapshot(.gpu).current?.anePower.map { "平均功耗：\(ValueFormat.number($0, precision: 2)) W" } ?? "平均功耗：暂不可用")
+                    NumericReadout(model.snapshot(.gpu).current?.anePower.map { "平均功耗：\(ValueFormat.number($0, precision: 2)) W" } ?? "平均功耗：暂不可用")
                     Text("利用率：暂不可读取").foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, minHeight: 72, alignment: .leading).padding(12)
                     .modifier(ControlMaterial(region: .cards, cornerRadius: 16, reduce: model.reduceTransparency))
@@ -937,7 +959,7 @@ struct Details: View {
             HStack {
                 Text("GPU 核心数")
                 Spacer()
-                Text(capabilities.coreCount.map { "\($0)" } ?? "—").monospacedDigit()
+                NumericReadout(capabilities.coreCount.map { "\($0)" } ?? "—").monospacedDigit()
                 Text("· 光线追踪")
                 Text(capabilities.supportsRayTracing.map { $0 ? "支持" : "不支持" } ?? "未知")
             }.font(.caption).foregroundStyle(.secondary)
@@ -952,9 +974,7 @@ struct Details: View {
                     Button { selectMetric(metric) } label: {
                         VStack(alignment: .leading, spacing: 9) {
                             Text(metric.rawValue).font(.caption).foregroundStyle(.primary)
-                            Text(snapshot.reading).font(.system(size: 14, weight: .medium)).monospacedDigit()
-                                .contentTransition(.numericText(value: snapshot.value ?? 0))
-                                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: snapshot.value)
+                            NumericReadout(snapshot.reading).font(.system(size: 14, weight: .medium)).monospacedDigit()
                             Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: 25)
                         }.padding(11).frame(maxWidth: .infinity, alignment: .leading)
                             .background(model.metric == metric ? metricColor.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 12))
@@ -974,7 +994,7 @@ struct Details: View {
                 Text(snapshot.missingReason ?? "暂无数据").font(.callout).foregroundStyle(.primary)
             } else {
                 ForEach(rows) { row in
-                    HStack { Text(row.label).foregroundStyle(.primary); Spacer(); Text(row.value).monospacedDigit() }.font(.callout)
+                    HStack { Text(row.label).foregroundStyle(.primary); Spacer(); NumericReadout(row.value).monospacedDigit() }.font(.callout)
                 }
             }
         }
