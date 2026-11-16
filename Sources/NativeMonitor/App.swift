@@ -11,6 +11,9 @@ struct StatusReadout {
 final class DetailWindow: NSWindow {
     private var chrome: WindowChrome?
     func installChrome() {
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            standardWindowButton(button)?.isHidden = true
+        }
         guard chrome == nil, let frameView = contentView?.superview else { return }
         let chrome = WindowChrome(frame: frameView.bounds)
         chrome.autoresizingMask = [.width, .height]
@@ -24,7 +27,11 @@ final class OverviewPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    let model = MonitorModel()
+    let model: MonitorModel
+    init(defaults: UserDefaults = .standard) {
+        model = MonitorModel(defaults: defaults)
+        super.init()
+    }
     var status: NSStatusItem!
     var overviewPanel: OverviewPanel!
     var outsideClickMonitor: Any?
@@ -68,7 +75,18 @@ final class OverviewPanel: NSPanel {
             self?.overviewPanel.appearance = appearance
             self?.overviewPanel.contentViewController?.view.appearance = appearance
         }.store(in: &subscriptions)
+        model.$pinWindows.dropFirst().sink { [weak self] pinned in
+            if !pinned && !NSApp.isActive { self?.hideWindows() }
+        }.store(in: &subscriptions)
         DispatchQueue.main.async { [weak self] in self?.showOverview() }
+    }
+    func applicationDidResignActive(_ notification: Notification) {
+        // 设置弹出框属于本应用，只有切换到其他应用时才收起。
+        if !model.pinWindows { hideWindows() }
+    }
+    func hideWindows() {
+        hideOverview()
+        if let detailWindow { dismiss(detailWindow) }
     }
     func applicationWillTerminate(_ notification: Notification) {
         model.stop()
@@ -117,7 +135,7 @@ final class OverviewPanel: NSPanel {
         }
     }
     func dismiss(_ window: NSWindow) {
-        guard window.isVisible else { return }
+        guard window.isVisible && !closingWindows.contains(ObjectIdentifier(window)) else { return }
         let key = ObjectIdentifier(window)
         let token = UUID()
         let target = transitionFrames[key] ?? window.frame
@@ -182,7 +200,7 @@ final class OverviewPanel: NSPanel {
         present(overviewPanel, frame: NSRect(origin: origin, size: size))
         if outsideClickMonitor == nil {
             outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-                guard let self else { return }
+                guard let self, !self.model.pinWindows else { return }
                 let statusFrame: NSRect?
                 if let button = self.status.button, let window = button.window {
                     statusFrame = window.convertToScreen(button.convert(button.bounds, to: nil))

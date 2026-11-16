@@ -4,7 +4,28 @@ import PrivateBackdrop
 
 private let darkMetricColor = Color(red: 0.35, green: 0.75, blue: 1)
 
+private struct AppearanceSettingsKey: EnvironmentKey {
+    static let defaultValue = AppearanceSettings()
+}
+extension EnvironmentValues {
+    var monitorAppearance: AppearanceSettings {
+        get { self[AppearanceSettingsKey.self] }
+        set { self[AppearanceSettingsKey.self] = newValue }
+    }
+}
+
+private struct AdjustableSurface: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let appearance: SurfaceAppearance
+    var body: some View {
+        PrivateRegionBackdrop(presented: true, reduceMotion: reduceMotion, diagnostics: nil,
+                              appearance: appearance, fadesEdges: false)
+            .allowsHitTesting(false)
+    }
+}
+
 struct GlassButton: ViewModifier {
+    @Environment(\.monitorAppearance) private var appearance
     @Environment(\.colorScheme) private var colorScheme
     let reduce: Bool
     var circular = false
@@ -12,7 +33,13 @@ struct GlassButton: ViewModifier {
     var translucent = false
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 26.0, *), !reduce && !systemReduce {
+        let surface = appearance[card || translucent ? .cards : .controls]
+        if !reduce && !systemReduce && surface != SurfaceAppearance() {
+            content.buttonStyle(.plain).background {
+                AdjustableSurface(appearance: surface)
+                    .clipShape(RoundedRectangle(cornerRadius: circular ? 100 : 22))
+            }
+        } else if #available(macOS 26.0, *), !reduce && !systemReduce {
             if card || translucent {
                 content.buttonStyle(.plain).background {
                     RoundedRectangle(cornerRadius: 22).fill(.clear)
@@ -31,6 +58,8 @@ struct PrivateRegionBackdrop: NSViewRepresentable {
     let presented: Bool
     let reduceMotion: Bool
     let diagnostics: BackdropDiagnostics?
+    var appearance = SurfaceAppearance()
+    var fadesEdges = true
     final class Coordinator {
         let id = UUID()
         let diagnostics: BackdropDiagnostics?
@@ -44,6 +73,8 @@ struct PrivateRegionBackdrop: NSViewRepresentable {
     }
     func makeNSView(context: Context) -> NMPrivateBackdropView { NMPrivateBackdropView(frame: .zero) }
     func updateNSView(_ view: NMPrivateBackdropView, context: Context) {
+        view.configure(withBlurRadius: appearance.blur, opacity: 1 - appearance.transparency,
+                       dimming: 2 * (1 - appearance.clarity), fadesEdges: fadesEdges)
         view.setPresented(presented, animated: !reduceMotion)
         let coordinator = context.coordinator
         let id = coordinator.id
@@ -55,22 +86,28 @@ struct PrivateRegionBackdrop: NSViewRepresentable {
 }
 
 struct ControlMaterial: ViewModifier {
+    @Environment(\.monitorAppearance) private var appearance
+    var region: AppearanceRegion = .controls
     @Environment(\.colorScheme) private var colorScheme
     var cornerRadius: CGFloat = 12
     var materialOpacity: Double = 1
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     let reduce: Bool
-    @ViewBuilder func body(content: Content) -> some View {
-        if reduce || systemReduce {
-            content.background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: cornerRadius))
-        } else if #available(macOS 26.0, *) {
-            content.background {
+    func body(content: Content) -> some View {
+        // 切换材质只重建背景，避免调节滑块时关闭内容中的设置弹出框。
+        content.background {
+            if reduce || systemReduce {
+                RoundedRectangle(cornerRadius: cornerRadius).fill(Color(nsColor: .controlBackgroundColor))
+            } else if appearance[region] != SurfaceAppearance() {
+                AdjustableSurface(appearance: appearance[region])
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            } else if #available(macOS 26.0, *) {
                 RoundedRectangle(cornerRadius: cornerRadius).fill(.clear)
                     .glassEffect(Glass.clear.tint(colorScheme == .dark ? .black.opacity(0.18) : nil), in: RoundedRectangle(cornerRadius: cornerRadius))
                     .opacity(materialOpacity)
+            } else {
+                RoundedRectangle(cornerRadius: cornerRadius).fill(.regularMaterial)
             }
-        } else {
-            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
         }
     }
 }
@@ -107,27 +144,68 @@ private struct SettingsMenu<Value: Hashable>: View {
 struct MonitorSettings: View {
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @ObservedObject var model: MonitorModel
+    @State private var appearanceRegion: AppearanceRegion = .overview
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SettingsMenu(title: "外观", selection: $model.theme,
-                         options: Theme.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
-                .accessibilityIdentifier("themePicker")
-            SettingsMenu(title: "历史范围", selection: $model.range,
-                         options: HistoryRange.allCases.map { ($0, $0.label) }, reduce: model.reduceTransparency)
-            SettingsMenu(title: "采样间隔", selection: $model.interval,
-                         options: [1, 2, 5].map { ($0, "\($0) 秒") }, reduce: model.reduceTransparency)
-            SettingsMenu(title: "CPU 口径", selection: $model.cpuScale,
-                         options: CPUScale.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
-            SettingsMenu(title: "主读数小数位", selection: $model.precision,
-                         options: [0, 1, 2].map { ($0, "最多 \($0) 位") }, reduce: model.reduceTransparency)
-            Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
-                .font(.caption).foregroundStyle(.secondary)
-            Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
-            if !model.reduceTransparency && !systemReduce {
-                BackdropStatus(diagnostics: model.backdropDiagnostics)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsMenu(title: "外观", selection: $model.theme,
+                             options: Theme.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+                    .accessibilityIdentifier("themePicker")
+                SettingsMenu(title: "历史范围", selection: $model.range,
+                             options: HistoryRange.allCases.map { ($0, $0.label) }, reduce: model.reduceTransparency)
+                SettingsMenu(title: "采样间隔", selection: $model.interval,
+                             options: [1, 2, 5].map { ($0, "\($0) 秒") }, reduce: model.reduceTransparency)
+                SettingsMenu(title: "CPU 口径", selection: $model.cpuScale,
+                             options: CPUScale.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+                SettingsMenu(title: "主读数小数位", selection: $model.precision,
+                             options: [0, 1, 2].map { ($0, "最多 \($0) 位") }, reduce: model.reduceTransparency)
+                Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("固定窗口", isOn: $model.pinWindows).toggleStyle(.switch)
+                    .accessibilityIdentifier("pinWindows")
+                Text("关闭时，切换到其他应用会收起窗口；开启后保持显示。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
+                Divider()
+                Text("背景效果").font(.headline)
+                SettingsMenu(title: "调整区域", selection: $appearanceRegion,
+                             options: AppearanceRegion.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+                VStack(spacing: 12) {
+                    appearanceSlider("通透度", value: $model.appearance[appearanceRegion].clarity, range: 0...1)
+                    appearanceSlider("透明度", value: $model.appearance[appearanceRegion].transparency, range: 0...1)
+                    appearanceSlider("模糊度", value: $model.appearance[appearanceRegion].blur, range: 0...30)
+                }.disabled(model.reduceTransparency || systemReduce)
+                Text("通透度调整底色浓淡，透明度调整背景可见程度，模糊度调整背景模糊半径。文字和图表保持清晰。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if model.reduceTransparency || systemReduce {
+                    Text("减少透明度已开启，背景效果暂不生效。关闭后恢复自定义效果。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("恢复本区域") { model.appearance[appearanceRegion] = SurfaceAppearance() }
+                    Spacer()
+                    Button("恢复全部背景") { model.appearance = AppearanceSettings() }
+                }
+                if !model.reduceTransparency && !systemReduce {
+                    BackdropStatus(diagnostics: model.backdropDiagnostics)
+                }
+            }.font(.system(size: 12)).padding(14)
+                .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
+        }.frame(maxHeight: 560)
+            .environment(\.monitorAppearance, model.appearance)
+    }
+    private func appearanceSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(title == "模糊度" ? "\(Int(value.wrappedValue)) pt" : "\(Int(value.wrappedValue * 100))%")
+                    .monospacedDigit().foregroundStyle(.secondary)
             }
-        }.font(.system(size: 12)).padding(14)
-            .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
+            Slider(value: value, in: range, step: title == "模糊度" ? 1 : 0.01) { Text("\(appearanceRegion.rawValue)\(title)") }
+                .labelsHidden()
+                .accessibilityIdentifier("appearance-\(appearanceRegion)-\(title)")
+        }
     }
 }
 struct Trend: View {
@@ -322,7 +400,7 @@ struct MemorySeriesCharts: View {
                                 .frame(height: 90)
                                 .accessibilityLabel("\(name)内存趋势，当前\(snapshot.current?.series[name].map { ValueFormat.reading($0, metric: .memory, precision: 2) } ?? "暂无数据")，刻度\(scale.lowerBound.formatted(.number.precision(.fractionLength(2))))至\(scale.upperBound.formatted(.number.precision(.fractionLength(2)))) GB")
                             }
-                        }.padding(12).modifier(ControlMaterial(cornerRadius: 16, reduce: reduce))
+                        }.padding(12).modifier(ControlMaterial(region: .cards, cornerRadius: 16, reduce: reduce))
                     }
                 }
             }
@@ -330,6 +408,7 @@ struct MemorySeriesCharts: View {
     }
 }
 struct RangePicker: View {
+    @Environment(\.monitorAppearance) private var appearance
     @ObservedObject var model: MonitorModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
@@ -345,8 +424,15 @@ struct RangePicker: View {
                 if #available(macOS 26.0, *), !model.reduceTransparency && !systemReduce {
                     ZStack(alignment: .leading) {
                         if let index = quickRanges.firstIndex(of: model.range) {
-                            RoundedRectangle(cornerRadius: 12).fill(.clear)
-                                .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
+                            Group {
+                                if appearance[.controls] == SurfaceAppearance() {
+                                    RoundedRectangle(cornerRadius: 12).fill(.clear)
+                                        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
+                                } else {
+                                    AdjustableSurface(appearance: appearance[.controls])
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+                            }
                                 .frame(width: 84, height: 28)
                                 .offset(x: CGFloat(index) * 84)
                                 .allowsHitTesting(false)
@@ -431,7 +517,8 @@ struct Overview: View {
                     .modifier(GlassButton(reduce: model.reduceTransparency)).keyboardShortcut("1", modifiers: .command)
             }.modifier(GlassReveal(presented: model.overviewPresented, delay: 0.14))
         }.padding([.horizontal, .bottom], 16).padding(.top, 4).frame(width: 440)
-            .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.overviewPresented, topPadding: 16, diagnostics: model.backdropDiagnostics))
+            .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.overviewPresented, topPadding: 16, diagnostics: model.backdropDiagnostics, appearance: model.appearance[.overview]))
+            .environment(\.monitorAppearance, model.appearance)
             .onExitCommand(perform: close)
     }
     private func metricCard(_ metric: Metric) -> some View {
@@ -464,6 +551,7 @@ struct WindowGlass: ViewModifier {
     var presented = true
     var topPadding: CGFloat = 32
     var diagnostics: BackdropDiagnostics? = nil
+    var appearance = SurfaceAppearance()
     func body(content: Content) -> some View {
         // 整窗只做背景模糊，避免大块玻璃透镜产生矩形明暗边界。
         content.padding([.horizontal, .bottom], 32).padding(.top, topPadding)
@@ -471,7 +559,7 @@ struct WindowGlass: ViewModifier {
                 if reduce {
                     Color(nsColor: .windowBackgroundColor)
                 } else {
-                    PrivateRegionBackdrop(presented: presented, reduceMotion: reduceMotion, diagnostics: diagnostics).allowsHitTesting(false)
+                    PrivateRegionBackdrop(presented: presented, reduceMotion: reduceMotion, diagnostics: diagnostics, appearance: appearance).allowsHitTesting(false)
                 }
             }
     }
@@ -567,7 +655,7 @@ struct Details: View {
             // live sample updates, range, theme and sidebar state retain identity.
             .id(model.metric)
             .transition(reduceMotion ? .identity : .opacity.combined(with: .offset(y: 6)))
-            .modifier(ControlMaterial(cornerRadius: 24, materialOpacity: 0.65, reduce: model.reduceTransparency))
+            .modifier(ControlMaterial(region: .cards, cornerRadius: 24, materialOpacity: 0.65, reduce: model.reduceTransparency))
             .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.04))
             .navigationTitle("性能监控")
             .toolbar {
@@ -586,7 +674,8 @@ struct Details: View {
         .toolbarBackground(.hidden, for: .windowToolbar)
         .padding(10)
         .frame(minWidth: 640, minHeight: 520)
-        .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, diagnostics: model.backdropDiagnostics))
+        .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, diagnostics: model.backdropDiagnostics, appearance: model.appearance[.details]))
+        .environment(\.monitorAppearance, model.appearance)
         .onExitCommand(perform: close)
     }
 
@@ -632,6 +721,12 @@ struct Details: View {
                     Text("设置只影响本应用。").font(.caption).foregroundStyle(.primary)
                 }.padding(18).frame(width: 350)
             }
+            Button(action: close) {
+                Image(systemName: "xmark").font(.system(size: 16)).frame(width: 36, height: 36)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("关闭详情").accessibilityLabel("关闭详情")
         }
         .padding(4)
         .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
@@ -745,7 +840,7 @@ struct Details: View {
                     Text(fact.label).font(.caption).foregroundStyle(.primary)
                     Text(fact.value).font(.system(size: 17, weight: .medium)).monospacedDigit()
                 }.padding(12).frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-                    .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
+                    .modifier(ControlMaterial(region: .cards, cornerRadius: 16, reduce: model.reduceTransparency))
             }
         }
     }
@@ -795,7 +890,7 @@ struct Details: View {
                         Text(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—").monospacedDigit().fixedSize()
                     }
                     ProgressView(value: value ?? 0, total: 100).tint(color)
-                }.font(.caption).padding(10).frame(maxWidth: .infinity, minHeight: 64).modifier(ControlMaterial(reduce: model.reduceTransparency))
+                }.font(.caption).padding(10).frame(maxWidth: .infinity, minHeight: 64).modifier(ControlMaterial(region: .cards, reduce: model.reduceTransparency))
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(kind ?? "核心") \(index + 1)，\(value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "暂无数据")")
             }
@@ -811,14 +906,14 @@ struct Details: View {
                     Text(capabilities.supportsNeuralAccelerator == true ? "支持 · 每个 GPU 核心内置" : "未确认硬件支持")
                     Text("独立利用率：暂不可读取").foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, minHeight: 72, alignment: .leading).padding(12)
-                    .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
+                    .modifier(ControlMaterial(region: .cards, cornerRadius: 16, reduce: model.reduceTransparency))
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Apple Neural Engine", systemImage: "brain")
                     Text("独立神经网络引擎")
                     Text(model.snapshot(.gpu).current?.anePower.map { "平均功耗：\(ValueFormat.number($0, precision: 2)) W" } ?? "平均功耗：暂不可用")
                     Text("利用率：暂不可读取").foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, minHeight: 72, alignment: .leading).padding(12)
-                    .modifier(ControlMaterial(cornerRadius: 16, reduce: model.reduceTransparency))
+                    .modifier(ControlMaterial(region: .cards, cornerRadius: 16, reduce: model.reduceTransparency))
             }.font(.caption)
             HStack {
                 Text("GPU 核心数")

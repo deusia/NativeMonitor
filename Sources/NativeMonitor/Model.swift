@@ -184,11 +184,57 @@ struct Snapshot {
     }
 }
 
+enum AppearanceRegion: String, CaseIterable, Identifiable {
+    case overview = "概览背景", details = "详情背景", cards = "内容卡片", controls = "按钮与控件"
+    var id: String { rawValue }
+}
+
+/// 只调整背景，保留文字和图表的可读性。
+struct SurfaceAppearance: Equatable {
+    var clarity: Double
+    var transparency: Double
+    var blur: Double
+
+    init(clarity: Double = 0.5, transparency: Double = 0, blur: Double = 2) {
+        self.clarity = clarity.isFinite ? min(1, max(0, clarity)) : 0.5
+        self.transparency = transparency.isFinite ? min(1, max(0, transparency)) : 0
+        self.blur = blur.isFinite ? min(30, max(0, blur)) : 2
+    }
+}
+
+struct AppearanceSettings: Equatable {
+    private var surfaces: [AppearanceRegion: SurfaceAppearance] = [:]
+    subscript(region: AppearanceRegion) -> SurfaceAppearance {
+        get { surfaces[region] ?? SurfaceAppearance() }
+        set { surfaces[region] = SurfaceAppearance(clarity: newValue.clarity, transparency: newValue.transparency, blur: newValue.blur) }
+    }
+    init(defaults: UserDefaults? = nil) {
+        guard let defaults else { return }
+        for region in AppearanceRegion.allCases {
+            let key = "appearance.\(region)"
+            self[region] = SurfaceAppearance(
+                clarity: (defaults.object(forKey: key + ".clarity") as? Double) ?? 0.5,
+                transparency: (defaults.object(forKey: key + ".transparency") as? Double) ?? 0,
+                blur: (defaults.object(forKey: key + ".blur") as? Double) ?? 2)
+        }
+    }
+    func save(to defaults: UserDefaults) {
+        for region in AppearanceRegion.allCases {
+            let key = "appearance.\(region)", surface = self[region]
+            defaults.set(surface.clarity, forKey: key + ".clarity")
+            defaults.set(surface.transparency, forKey: key + ".transparency")
+            defaults.set(surface.blur, forKey: key + ".blur")
+        }
+    }
+}
+
 @MainActor final class MonitorModel: ObservableObject {
     @Published var metric: Metric = .cpu
     private let defaults: UserDefaults
+    @Published var appearance: AppearanceSettings { didSet { appearance.save(to: defaults) } }
     @Published var theme: Theme { didSet { defaults.set(theme.rawValue, forKey: "theme") } }
     @Published var range: HistoryRange { didSet { defaults.set(range.rawValue, forKey: "historyRange") } }
+    @Published var pinWindows: Bool { didSet { defaults.set(pinWindows, forKey: "pinWindows") } }
     @Published var reduceTransparency: Bool { didSet { defaults.set(reduceTransparency, forKey: "reduceTransparency") } }
     @Published var cpuScale: CPUScale { didSet { defaults.set(cpuScale.rawValue, forKey: "cpuScale") } }
     @Published var precision: Int { didSet { defaults.set(precision, forKey: "precision") } }
@@ -219,8 +265,10 @@ struct Snapshot {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        appearance = AppearanceSettings(defaults: defaults)
         theme = Theme(rawValue: defaults.string(forKey: "theme") ?? "") ?? .system
         range = HistoryRange(rawValue: defaults.integer(forKey: "historyRange")) ?? .short
+        pinWindows = defaults.bool(forKey: "pinWindows")
         reduceTransparency = defaults.bool(forKey: "reduceTransparency")
         cpuScale = CPUScale(rawValue: defaults.string(forKey: "cpuScale") ?? "") ?? .total
         let storedPrecision = defaults.object(forKey: "precision") as? Int
