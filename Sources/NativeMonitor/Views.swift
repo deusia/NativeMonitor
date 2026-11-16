@@ -614,7 +614,17 @@ struct Details: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
+            // 系统窗口按钮已隐藏，操作区直接与内容对齐，不沿用原生工具栏的窗口按钮留白。
+            HStack(spacing: 8) {
+                sidebarToggle
+                toolbarActions
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("窗口工具栏")
+            HStack(alignment: .top, spacing: 12) {
             if sidebarVisible {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -698,21 +708,9 @@ struct Details: View {
             .allowsHitTesting(pageTransition.visible)
             .modifier(ControlMaterial(region: .cards, cornerRadius: 24, materialOpacity: 0.65, reduce: model.reduceTransparency))
             .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.04))
-            .navigationTitle("性能监控")
-            .toolbar {
-                if #available(macOS 26.0, *) {
-                    ToolbarItem(placement: .navigation) { sidebarToggle }
-                        .sharedBackgroundVisibility(.hidden)
-                    ToolbarItemGroup(placement: .primaryAction) { toolbarActions }
-                        .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .navigation) { sidebarToggle }
-                    ToolbarItemGroup(placement: .primaryAction) { toolbarActions }
-                }
             }
         }
 
-        .toolbarBackground(.hidden, for: .windowToolbar)
         .padding(10)
         .frame(minWidth: 640, minHeight: 520)
         .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, diagnostics: model.backdropDiagnostics, appearance: model.appearance[.details]))
