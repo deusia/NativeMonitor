@@ -5,6 +5,39 @@ import SwiftUI
 import Combine
 @testable import NativeMonitor
 final class ModelTests: XCTestCase {
+    @MainActor func testStatusReadoutKeepsColumnsFixedAcrossDigitAndUnitChanges() throws {
+        let readout = StatusReadout()
+        readout.setFrameSize(readout.fittingSize)
+        readout.layoutSubtreeIfNeeded()
+        let fields = try readout.arrangedSubviews.map { try XCTUnwrap($0 as? NSTextField) }
+        let frames = fields.map(\.frame)
+        let width = readout.fittingSize.width
+        let maximumCPU = Double(ProcessInfo.processInfo.processorCount * 100)
+        let maximumMemory = ValueFormat.memoryGigabytes(ProcessInfo.processInfo.physicalMemory)
+        for precision in 0...2 {
+            for value in [0.0, 0.001, 9.99, 10, 99.99, 100, 999.999, maximumCPU, maximumMemory] {
+                for rate in [0.0, 0.001, 999.99, 1000, 999_999.999, 1_000_000, 999_999_999.999, 1_000_000_000, 1_000_000_000_000] {
+                    let values = [ValueFormat.number(min(value, maximumCPU), precision: precision) + "%",
+                                  ValueFormat.number(min(value, maximumMemory), precision: precision) + "G",
+                                  "↓" + ValueFormat.rate(rate, precision: precision)]
+                    readout.update(values)
+                    readout.layoutSubtreeIfNeeded()
+                    XCTAssertEqual(fields.map(\.frame), frames)
+                    XCTAssertEqual(readout.fittingSize.width, width)
+                    for (field, value) in zip(fields, values) {
+                        XCTAssertEqual(field.stringValue, value)
+                        XCTAssertLessThanOrEqual(field.cell!.cellSize.width, field.frame.width)
+                    }
+                }
+            }
+        }
+        readout.update(["—", "—", "↓—"])
+        readout.layoutSubtreeIfNeeded()
+        XCTAssertEqual(fields.map(\.frame), frames)
+        XCTAssertEqual(readout.fittingSize.width, width)
+        XCTAssertNil(readout.hitTest(.zero))
+    }
+
     func testResizeHitRegionsAndContentPassThrough() {
         let bounds = NSRect(x: 0, y: 0, width: 800, height: 600)
         let cases: [(NSPoint, ResizeEdges)] = [
