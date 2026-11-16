@@ -5,7 +5,7 @@ static BOOL Put(id object, NSString *key, id value) {
     @try { [object setValue:value forKey:key]; return YES; }
     @catch (NSException *e) { NSLog(@"不支持 %@: %@", key, e.name); return NO; }
 }
-static CGImageRef Mask(size_t w, size_t h) {
+static CGImageRef Mask(size_t w, size_t h, BOOL fadesEdges) {
     if(w==0 || h==0 || w>4096 || h>4096) return NULL;
     NSMutableData *data = [NSMutableData dataWithLength:w*h*4];
     uint8_t *p=data.mutableBytes;
@@ -14,7 +14,7 @@ static CGImageRef Mask(size_t w, size_t h) {
         double qx=fabs(x+.5-w/2.)-w/2.+64, qy=fabs(y+.5-h/2.)-h/2.+64;
         // 仅圆角外侧需要计算斜距，绝大多数像素使用直边距离。
         double d=(qx>0 && qy>0 ? hypot(qx,qy) : fmax(qx,qy))-64;
-        double t=fmin(1,fmax(0,-d/fade));
+        double t=fadesEdges ? fmin(1,fmax(0,-d/fade)) : 1;
         uint8_t a=round(255*t*t*(3-2*t));
         size_t k=(y*w+x)*4; p[k]=a;p[k+1]=a;p[k+2]=a;p[k+3]=a;
     }
@@ -24,6 +24,22 @@ static CGImageRef Mask(size_t w, size_t h) {
     CGImageRef image=CGBitmapContextCreateImage(ctx); CGContextRelease(ctx);CGColorSpaceRelease(cs);return image;
 }
 
+// 多个区域共享同一窗口的合成配置，最后一个区域移除时才恢复。
+@interface NMBackdropWindowState : NSObject
+@property NSUInteger users;
+@property id oldFlatten;
+@property id oldHosting;
+@property BOOL available;
+@end
+@implementation NMBackdropWindowState
+@end
+static NSMapTable<NSWindow *, NMBackdropWindowState *> *WindowStates(void) {
+    static NSMapTable *states;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ states=[NSMapTable weakToStrongObjectsMapTable]; });
+    return states;
+}
+
 @interface NMPrivateBackdropView ()
 @property CALayer *backdrop;
 @property id blur;
@@ -31,8 +47,10 @@ static CGImageRef Mask(size_t w, size_t h) {
 @property(readwrite, copy) NSString *effectStatus;
 @property NSSize maskSize;
 @property(weak) NSWindow *configuredWindow;
-@property id oldFlatten;
-@property id oldHosting;
+@property double blurRadius;
+@property double effectOpacity;
+@property double dimmingStrength;
+@property BOOL fadesEdges;
 @property BOOL presentationInitialized;
 @property BOOL presented;
 @end
@@ -40,6 +58,7 @@ static CGImageRef Mask(size_t w, size_t h) {
 -(instancetype)initWithFrame:(NSRect)frame {
     if((self=[super initWithFrame:frame])) {
         self.wantsLayer=YES;
+        _blurRadius=2;_effectOpacity=1;_dimmingStrength=1;_fadesEdges=YES;
         self.effectStatus=@"私有背景接口不可用；区域模糊已关闭";
         Class cls=NSClassFromString(@"CABackdropLayer"), filter=NSClassFromString(@"CAFilter");
         SEL selector=NSSelectorFromString(@"filterWithType:");
@@ -64,6 +83,31 @@ static CGImageRef Mask(size_t w, size_t h) {
         self.effectStatus=@"私有渐变模糊 · 无录屏 · 系统升级可能失效";
     }return self;
 }
+-(void)configureWithBlurRadius:(double)radius opacity:(double)opacity dimming:(double)dimming fadesEdges:(BOOL)fadesEdges {
+    radius=isfinite(radius) ? fmin(30,fmax(0,radius)) : 2;
+    opacity=isfinite(opacity) ? fmin(1,fmax(0,opacity)) : 1;
+    dimming=isfinite(dimming) ? fmin(2,fmax(0,dimming)) : 1;
+    [CATransaction begin];[CATransaction setDisableActions:YES];
+    if(self.blurRadius!=radius) {
+        self.blurRadius=radius;
+        if(self.blur && !Put(self.blur,@"inputRadius",@(radius))) {
+            self.backdrop.filters=nil;self.dimming.hidden=YES;
+            self.effectStatus=@"模糊参数不可用；区域模糊已关闭";
+        }
+    }
+    if(self.effectOpacity!=opacity) {
+        self.effectOpacity=opacity;
+        for(CALayer *layer in self.layer.sublayers) {
+            [layer removeAnimationForKey:@"presentationOpacity"];
+            layer.opacity=(!self.presentationInitialized || self.presented) ? opacity : 0;
+        }
+    }
+    if(self.dimmingStrength!=dimming) {self.dimmingStrength=dimming;[self updateDimming];}
+    if(self.fadesEdges!=fadesEdges) {
+        self.fadesEdges=fadesEdges;self.maskSize=NSZeroSize;self.needsLayout=YES;
+    }
+    [CATransaction commit];
+}
 -(void)setPresented:(BOOL)presented animated:(BOOL)animated {
     if(self.presentationInitialized && self.presented==presented) {
         if(!animated) {
@@ -79,7 +123,7 @@ static CGImageRef Mask(size_t w, size_t h) {
         float from=layer.presentationLayer ? layer.presentationLayer.opacity : layer.opacity;
         [layer removeAnimationForKey:@"presentationOpacity"];
         [CATransaction begin];[CATransaction setDisableActions:YES];
-        layer.opacity=presented ? 1 : 0;
+        layer.opacity=presented ? self.effectOpacity : 0;
         [CATransaction commit];
         if(shouldAnimate) {
             CABasicAnimation *animation=[CABasicAnimation animationWithKeyPath:@"opacity"];
@@ -93,7 +137,7 @@ static CGImageRef Mask(size_t w, size_t h) {
 -(void)updateDimming {
     BOOL dark=[[self.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] isEqualToString:NSAppearanceNameDarkAqua];
     [CATransaction begin];[CATransaction setDisableActions:YES];
-    self.dimming.backgroundColor=[NSColor colorWithWhite:0 alpha:dark ? 0.18 : 0.06].CGColor;
+    self.dimming.backgroundColor=[NSColor colorWithWhite:0 alpha:(dark ? 0.18 : 0.06)*self.dimmingStrength].CGColor;
     [CATransaction commit];
 }
 -(void)viewDidChangeEffectiveAppearance {
@@ -103,8 +147,12 @@ static CGImageRef Mask(size_t w, size_t h) {
 -(NSView *)hitTest:(NSPoint)point {return nil;}
 -(void)viewWillMoveToWindow:(NSWindow *)window {
     if(self.configuredWindow && self.configuredWindow!=window) {
-        Put(self.configuredWindow,@"shouldAutoFlattenLayerTree",self.oldFlatten);
-        Put(self.configuredWindow,@"canHostLayersInWindowServer",self.oldHosting);
+        NMBackdropWindowState *state=[WindowStates() objectForKey:self.configuredWindow];
+        if(state && --state.users==0) {
+            if(state.oldFlatten) Put(self.configuredWindow,@"shouldAutoFlattenLayerTree",state.oldFlatten);
+            if(state.oldHosting) Put(self.configuredWindow,@"canHostLayersInWindowServer",state.oldHosting);
+            [WindowStates() removeObjectForKey:self.configuredWindow];
+        }
         self.configuredWindow=nil;
     }
     [super viewWillMoveToWindow:window];
@@ -113,17 +161,23 @@ static CGImageRef Mask(size_t w, size_t h) {
     [super viewDidMoveToWindow];
     NSWindow *window=self.window;
     if(!window || !self.backdrop || window==self.configuredWindow) return;
-    @try {
-        self.oldFlatten=[window valueForKey:@"shouldAutoFlattenLayerTree"];
-        self.oldHosting=[window valueForKey:@"canHostLayersInWindowServer"];
-        self.configuredWindow=window;
-        BOOL ok=Put(window,@"shouldAutoFlattenLayerTree",@NO)
-            && Put(window,@"canHostLayersInWindowServer",@NO)
-            && Put(window,@"canHostLayersInWindowServer",@YES);
-        if(!ok){self.backdrop.filters=nil;self.dimming.hidden=YES;self.effectStatus=@"窗口合成接口不可用；区域模糊已关闭";}
-    } @catch(NSException *e) {
-        NSLog(@"私有窗口合成不可用: %@",e.name);
-        self.backdrop.filters=nil;self.dimming.hidden=YES;self.effectStatus=@"窗口合成接口不可用；区域模糊已关闭";
+    NMBackdropWindowState *state=[WindowStates() objectForKey:window];
+    if(!state) {
+        state=[NMBackdropWindowState new];
+        [WindowStates() setObject:state forKey:window];
+        @try {
+            state.oldFlatten=[window valueForKey:@"shouldAutoFlattenLayerTree"];
+            state.oldHosting=[window valueForKey:@"canHostLayersInWindowServer"];
+            state.available=Put(window,@"shouldAutoFlattenLayerTree",@NO)
+                && Put(window,@"canHostLayersInWindowServer",@NO)
+                && Put(window,@"canHostLayersInWindowServer",@YES);
+        } @catch(NSException *e) {NSLog(@"私有窗口合成不可用: %@",e.name);}
+    }
+    state.users++;
+    self.configuredWindow=window;
+    if(!state.available) {
+        self.backdrop.filters=nil;self.dimming.hidden=YES;
+        self.effectStatus=@"窗口合成接口不可用；区域模糊已关闭";
     }
     self.needsLayout=YES;
 }
@@ -137,7 +191,7 @@ static CGImageRef Mask(size_t w, size_t h) {
     self.dimming.mask.frame=self.dimming.bounds;
     if(!NSEqualSizes(size,self.maskSize)) {
         self.maskSize=size;
-        CGImageRef image=Mask(size.width,size.height);
+        CGImageRef image=Mask(size.width,size.height,self.fadesEdges);
         BOOL ok=image && Put(self.blur,@"inputMaskImage",(__bridge id)image);
         self.backdrop.hidden=!ok;
         self.dimming.mask.contents=ok ? (__bridge id)image : nil;
