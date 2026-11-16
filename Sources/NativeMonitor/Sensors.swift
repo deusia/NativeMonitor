@@ -1,7 +1,7 @@
 import Foundation
 import IOKit
 
-struct SensorReading: Identifiable {
+struct SensorReading: Identifiable, Equatable {
     let id: String
     let value: Double
     let unit: String
@@ -134,9 +134,11 @@ final class SensorReader {
             }
             keys = found
         }
-        return keys!.compactMap { key, name, info in
+        let readings: [SensorReading] = keys!.compactMap { key, name, info in
             guard let bytes = read(key, info), let value = Self.decode(bytes, type: Self.string(info.type)), name.hasPrefix("T") || value >= 0 else { return nil }
             return SensorReading(id: name, value: value, unit: name.hasPrefix("T") ? "°C" : "rpm")
         }.sorted { $0.id < $1.id }
+        // 已识别的键全部读取失败时重建连接，避免睡眠唤醒后永久停留在空数据。
+        return !keys!.isEmpty && readings.isEmpty ? nil : readings
     }
 }

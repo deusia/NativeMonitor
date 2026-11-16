@@ -47,7 +47,6 @@ struct GPUCapabilities {
 }
 
 struct GPUReading {
-    let date: Date
     let driver: String
     let utilization: Double
     let renderer: Double?
@@ -57,7 +56,7 @@ struct GPUReading {
     var deviceName: String? = nil
     var recommendedWorkingSet: UInt64? = nil
 
-    static func parse(_ statistics: [String: Any], driver: String, date: Date = Date()) throws(GPUReadError) -> GPUReading {
+    static func parse(_ statistics: [String: Any], driver: String) throws(GPUReadError) -> GPUReading {
         func percent(_ key: String) -> Double? {
             guard let number = statistics[key] as? NSNumber,
                   CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
@@ -71,7 +70,7 @@ struct GPUReading {
             return number.uint64Value
         }
         guard let value = percent("Device Utilization %") else { throw GPUReadError.invalidCounter }
-        return GPUReading(date: date, driver: driver, utilization: value,
+        return GPUReading(driver: driver, utilization: value,
                           renderer: percent("Renderer Utilization %"), tiler: percent("Tiler Utilization %"),
                           allocatedMemory: bytes("Alloc system memory"), usedMemory: bytes("In use system memory"))
     }
@@ -87,6 +86,7 @@ enum GPUReadError: Error, LocalizedError {
     }
 }
 enum GPUReader {
+    private static let device = MTLCreateSystemDefaultDevice()
     static let capabilities = GPUCapabilities.detect()
     static func read() -> Result<GPUReading, GPUReadError> {
         var iterator: io_iterator_t = 0
@@ -107,7 +107,7 @@ enum GPUReader {
         // shortcut: 驱动字段没有稳定公开契约；支持其他硬件前必须重新核实来源与口径。
         do {
             var reading = try GPUReading.parse(candidate.1, driver: candidate.0)
-            if let device = MTLCreateSystemDefaultDevice() {
+            if let device {
                 reading.deviceName = device.name
                 reading.recommendedWorkingSet = device.recommendedMaxWorkingSetSize
             }

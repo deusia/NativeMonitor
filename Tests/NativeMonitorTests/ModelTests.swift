@@ -2,6 +2,7 @@ import XCTest
 import AppKit
 import PrivateBackdrop
 import SwiftUI
+import Combine
 @testable import NativeMonitor
 private struct MaterialContentProbe: NSViewRepresentable {
     let created: () -> Void
@@ -9,6 +10,14 @@ private struct MaterialContentProbe: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {}
 }
 final class ModelTests: XCTestCase {
+    @MainActor func testStatusReadoutOnlyReconfiguresLayoutWhenSettingsChange() {
+        let readout = StatusReadout(cpuScale: .average, precision: 0)
+        XCTAssertFalse(readout.update(["9%", "10G", "↓0 B/s"], cpuScale: .average, precision: 0))
+        XCTAssertTrue(readout.update(["9.1%", "10.1G", "↓1 B/s"], cpuScale: .average, precision: 1))
+        XCTAssertFalse(readout.update(["99%", "20G", "↓999 MB/s"], cpuScale: .average, precision: 1))
+        XCTAssertTrue(readout.update(["999%", "20G", "↓999 MB/s"], cpuScale: .total, precision: 1))
+    }
+
     @MainActor func testMaterialChangesPreserveContentIdentity() {
         var creations = 0
         func root(_ appearance: AppearanceSettings, reduce: Bool) -> some View {
@@ -257,6 +266,25 @@ final class ModelTests: XCTestCase {
         XCTAssertTrue(dimming.isHidden)
     }
 
+    @MainActor func testOptimizedBackdropMaskKeepsRoundedGradient() throws {
+        for size in [NSSize(width: 320, height: 400), NSSize(width: 100, height: 80)] {
+            let view = NMPrivateBackdropView(frame: NSRect(origin: .zero, size: size))
+            view.layout()
+            let image = try XCTUnwrap(view.layer?.sublayers?.last?.mask?.contents) as! CGImage
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            for y in stride(from: 0, to: Int(size.height), by: 7) {
+                for x in stride(from: 0, to: Int(size.width), by: 7) {
+                    let qx = abs(Double(x) + 0.5 - size.width / 2) - size.width / 2 + 64
+                    let qy = abs(Double(y) + 0.5 - size.height / 2) - size.height / 2 + 64
+                    let distance = hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0) - 64
+                    let t = min(1, max(0, -distance / min(160, min(size.width, size.height) / 3)))
+                    let expected = (255 * t * t * (3 - 2 * t)).rounded() / 255
+                    XCTAssertEqual(try XCTUnwrap(bitmap.colorAt(x: x, y: y)).alphaComponent, expected, accuracy: 0.001)
+                }
+            }
+        }
+    }
+
     @MainActor func testBackdropPresentationAnimationCanReverse() throws {
         let view = NMPrivateBackdropView(frame: NSRect(x: 0, y: 0, width: 320, height: 400))
         view.layout()
@@ -298,6 +326,22 @@ final class ModelTests: XCTestCase {
         XCTAssertTrue(AppDelegate.shouldDismissOverview(at: NSPoint(x: 400, y: 460), panel: panel, status: nil))
     }
 
+    @MainActor func testOverviewPlacementHandlesHiddenMenuBarAndScreenEdges() {
+        let screen = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let visible = NSRect(x: 0, y: 0, width: 1440, height: 875)
+        let size = NSSize(width: 440, height: 600)
+        let centered = AppDelegate.overviewFrame(size: size, anchor: NSRect(x: 650, y: 875, width: 100, height: 25), screen: screen, visible: visible)
+        XCTAssertEqual(centered, NSRect(x: 480, y: 269, width: 440, height: 600))
+        let left = AppDelegate.overviewFrame(size: size, anchor: NSRect(x: 0, y: 875, width: 40, height: 25), screen: screen, visible: visible)
+        XCTAssertEqual(left.minX, 8)
+        let right = AppDelegate.overviewFrame(size: size, anchor: NSRect(x: 1400, y: 875, width: 40, height: 25), screen: screen, visible: visible)
+        XCTAssertEqual(right.maxX, 1432)
+        let hidden = AppDelegate.overviewFrame(size: size, anchor: .zero, screen: screen, visible: visible)
+        XCTAssertEqual(hidden, NSRect(x: 992, y: 269, width: 440, height: 600))
+        let offscreen = AppDelegate.overviewFrame(size: size, anchor: NSRect(x: 1600, y: 875, width: 40, height: 25), screen: screen, visible: visible)
+        XCTAssertEqual(offscreen, hidden)
+    }
+
     @MainActor func testOverviewStaysInPlaceWhenMenuBarMoves() throws {
         _ = NSApplication.shared
         let delegate = AppDelegate()
@@ -312,10 +356,13 @@ final class ModelTests: XCTestCase {
         let statusWindow = try XCTUnwrap(button.window)
         let screen = try XCTUnwrap(statusWindow.screen)
         let anchor = statusWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        delegate.model.stop()
+        delegate.showOverview()
         let panel = delegate.overviewPanel.frame
+        let anchorReady = screen.frame.contains(NSPoint(x: anchor.midX, y: anchor.midY)) && anchor.midY >= screen.visibleFrame.maxY
         let expectedX = min(max(anchor.midX - panel.width / 2, screen.visibleFrame.minX + 8), screen.visibleFrame.maxX - panel.width - 8)
-        XCTAssertEqual(panel.minX, expectedX, accuracy: 1)
-        XCTAssertEqual(panel.maxY, anchor.minY - 6, accuracy: 1)
+        XCTAssertEqual(panel.minX, anchorReady ? expectedX : screen.visibleFrame.maxX - panel.width - 8, accuracy: 1)
+        XCTAssertEqual(panel.maxY, (anchorReady ? anchor.minY : screen.visibleFrame.maxY) - 6, accuracy: 1)
         button.title += "宽宽"
         NotificationCenter.default.post(name: NSWindow.didMoveNotification, object: statusWindow)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
@@ -367,6 +414,107 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(snapshot.maximum(.short), 0.001)
         XCTAssertNil(snapshot.value)
     }
+    @MainActor func testPageTransitionCancelsOldTargetAndOnlyReplacesAfterFadeOut() async throws {
+        let transition = MetricPageTransition(metric: .cpu)
+        let first = Task { await transition.show(.gpu, animated: true) }
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(transition.metric, .cpu)
+        XCTAssertFalse(transition.visible)
+        first.cancel()
+        let latest = Task { await transition.show(.memory, animated: true) }
+        await first.value
+        await latest.value
+        XCTAssertEqual(transition.metric, .memory)
+        XCTAssertTrue(transition.visible)
+        await transition.show(.network, animated: false)
+        XCTAssertEqual(transition.metric, .network)
+        XCTAssertTrue(transition.visible)
+    }
+
+    @MainActor func testReturningToCurrentPageCancelsFadeWithoutLeavingItInvisible() async throws {
+        let transition = MetricPageTransition(metric: .cpu)
+        let outgoing = Task { await transition.show(.gpu, animated: true) }
+        try await Task.sleep(for: .milliseconds(20))
+        outgoing.cancel()
+        await transition.show(.cpu, animated: true)
+        await outgoing.value
+        XCTAssertEqual(transition.metric, .cpu)
+        XCTAssertTrue(transition.visible)
+    }
+
+    func testSamplingRequestTimeoutAndStopDoNotQueueOrAcceptLateResults() {
+        var request = SamplingRequest()
+        XCTAssertTrue(request.begin(at: 100))
+        XCTAssertFalse(request.begin(at: 101))
+        XCTAssertFalse(request.timedOut(at: 106, after: 6))
+        XCTAssertTrue(request.timedOut(at: 107, after: 6))
+        XCTAssertFalse(request.timedOut(at: 120, after: 6))
+        XCTAssertFalse(request.begin(at: 120))
+        XCTAssertFalse(request.finish())
+        XCTAssertTrue(request.begin(at: 121))
+        XCTAssertTrue(request.finish())
+        XCTAssertFalse(request.finish())
+        XCTAssertTrue(request.begin(at: 122))
+        request.invalidate()
+        XCTAssertFalse(request.begin(at: 123))
+        XCTAssertFalse(request.finish())
+        XCTAssertTrue(request.begin(at: 124))
+        XCTAssertTrue(request.finish())
+    }
+
+    func testHistoryWindowIncludesBoundariesAndExcludesFutureSamples() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let offsets = [-86_401.0, -86_400, -301, -300, -1, 0, 1]
+        let history = offsets.map { TimedValue(date: now.addingTimeInterval($0), value: abs($0), series: ["设备": abs($0)]) }
+        let current = MetricReading(date: now, value: 0, status: "", facts: [], rows: [])
+        let snapshot = Snapshot(metric: .network, current: current, history: history, now: now)
+        XCTAssertEqual(snapshot.samples(.short).map(\.value), [300, 1, 0])
+        XCTAssertEqual(snapshot.seriesSamples(.short).map(\.value), [300, 1, 0])
+        XCTAssertEqual(snapshot.samples(.day).count, 5)
+        XCTAssertEqual(snapshot.plotStart(.short), -5)
+        XCTAssertEqual(history.lowerBound(now.addingTimeInterval(-300)), 3)
+        XCTAssertEqual(history.lowerBound(now, strictlyAfter: true), 6)
+        XCTAssertEqual([TimedValue]().lowerBound(now), 0)
+        XCTAssertEqual(history.lowerBound(now.addingTimeInterval(2)), history.count)
+    }
+
+    @MainActor func testBatchUpdatesPublishOnceAndRetainOnlyOrderedValidHistory() throws {
+        let model = MonitorModel()
+        let start = Date(timeIntervalSince1970: 100_000)
+        var notifications = 0
+        let subscription = model.$readings.dropFirst().sink { _ in notifications += 1 }
+        defer { subscription.cancel() }
+        func reading(_ date: Date, value: Double = 1, series: [String: Double] = [:]) -> MetricReading {
+            MetricReading(date: date, value: value, status: "正常", facts: [], rows: [], series: series)
+        }
+        model.record([.disk: reading(start), .network: reading(start)], at: start)
+        XCTAssertEqual(notifications, 1)
+        XCTAssertEqual(model.histories[.disk]?.count, 1)
+        let day = start.addingTimeInterval(86_400)
+        model.record([.disk: reading(day)], at: day)
+        XCTAssertEqual(model.histories[.disk]?.count, 2)
+        let later = day.addingTimeInterval(1)
+        model.record([.disk: reading(later)], at: later)
+        XCTAssertEqual(model.histories[.disk]?.map(\.date), [day, later])
+        model.record([.disk: reading(start)], at: start)
+        XCTAssertEqual(model.histories[.disk]?.map(\.date), [start])
+        let snapshot = model.snapshot(.disk)
+        model.record([.network: reading(start.addingTimeInterval(1))], at: start.addingTimeInterval(1))
+        XCTAssertTrue(snapshot.hasSameChart(as: model.snapshot(.disk)))
+        XCTAssertEqual(model.snapshot(.disk).now, start)
+        model.record([.disk: reading(start, value: .nan)], at: start)
+        XCTAssertNil(model.readings[.disk]?.value)
+        XCTAssertTrue(try XCTUnwrap(model.histories[.disk]).isEmpty)
+        model.record([.disk: reading(start, series: ["写入": .infinity])], at: start)
+        XCTAssertNil(model.readings[.disk]?.value)
+        model.record([.disk: reading(start)], at: start.addingTimeInterval(100))
+        XCTAssertNil(model.readings[.disk]?.value)
+        model.record([.disk: reading(later)], at: later)
+        XCTAssertEqual(model.histories[.disk]?.count, 1)
+        XCTAssertEqual(snapshot.history.count, 1)
+        XCTAssertFalse(snapshot.hasSameChart(as: model.snapshot(.disk)))
+    }
+
     func testChartReductionPreservesExtremaEndpointsAndOrder() {
         let samples: [Sample] = (0..<1000).map { index in
             let value: Double = index == 337 ? 10_000 : (index == 338 ? -100 : 5)
@@ -447,8 +595,8 @@ final class ModelTests: XCTestCase {
         let reading = MetricReading(date: now, value: 1, status: "", facts: [], rows: [])
         let history = [3601.0, 3600, 21600, 86400, 86401].map {
             TimedValue(date: now.addingTimeInterval(-$0), value: $0)
-        }.reversed()
-        let snapshot = Snapshot(metric: .network, current: reading, history: Array(history), now: now)
+        }.sorted { $0.date < $1.date }
+        let snapshot = Snapshot(metric: .network, current: reading, history: history, now: now)
         XCTAssertEqual(snapshot.samples(.hour).count, 1)
         XCTAssertEqual(snapshot.samples(.sixHours).count, 3)
         XCTAssertEqual(snapshot.samples(.day).count, 4)

@@ -144,54 +144,62 @@ private struct SettingsMenu<Value: Hashable>: View {
 struct MonitorSettings: View {
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @ObservedObject var model: MonitorModel
+    let close: () -> Void
     @State private var appearanceRegion: AppearanceRegion = .overview
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                SettingsMenu(title: "外观", selection: $model.theme,
-                             options: Theme.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
-                    .accessibilityIdentifier("themePicker")
-                SettingsMenu(title: "历史范围", selection: $model.range,
-                             options: HistoryRange.allCases.map { ($0, $0.label) }, reduce: model.reduceTransparency)
-                SettingsMenu(title: "采样间隔", selection: $model.interval,
-                             options: [1, 2, 5].map { ($0, "\($0) 秒") }, reduce: model.reduceTransparency)
-                SettingsMenu(title: "CPU 口径", selection: $model.cpuScale,
-                             options: CPUScale.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
-                SettingsMenu(title: "主读数小数位", selection: $model.precision,
-                             options: [0, 1, 2].map { ($0, "最多 \($0) 位") }, reduce: model.reduceTransparency)
-                Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Toggle("固定窗口", isOn: $model.pinWindows).toggleStyle(.switch)
-                    .accessibilityIdentifier("pinWindows")
-                Text("关闭时，切换到其他应用会收起窗口；开启后保持显示。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
-                Divider()
-                Text("背景效果").font(.headline)
-                SettingsMenu(title: "调整区域", selection: $appearanceRegion,
-                             options: AppearanceRegion.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
-                VStack(spacing: 12) {
-                    appearanceSlider("通透度", value: $model.appearance[appearanceRegion].clarity, range: 0...1)
-                    appearanceSlider("透明度", value: $model.appearance[appearanceRegion].transparency, range: 0...1)
-                    appearanceSlider("模糊度", value: $model.appearance[appearanceRegion].blur, range: 0...30)
-                }.disabled(model.reduceTransparency || systemReduce)
-                Text("通透度调整底色浓淡，透明度调整背景可见程度，模糊度调整背景模糊半径。文字和图表保持清晰。")
-                    .font(.caption).foregroundStyle(.secondary)
-                if model.reduceTransparency || systemReduce {
-                    Text("减少透明度已开启，背景效果暂不生效。关闭后恢复自定义效果。")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("设置").font(.headline)
+                Spacer()
+                Button("完成", action: close).modifier(GlassButton(reduce: model.reduceTransparency))
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsMenu(title: "外观", selection: $model.theme,
+                                 options: Theme.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+                        .accessibilityIdentifier("themePicker")
+                    SettingsMenu(title: "历史范围", selection: $model.range,
+                                 options: HistoryRange.allCases.map { ($0, $0.label) }, reduce: model.reduceTransparency)
+                    SettingsMenu(title: "采样间隔", selection: $model.interval,
+                                 options: [1, 2, 5].map { ($0, "\($0) 秒") }, reduce: model.reduceTransparency)
+                    SettingsMenu(title: "CPU 口径", selection: $model.cpuScale,
+                                 options: CPUScale.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+                    SettingsMenu(title: "主读数小数位", selection: $model.precision,
+                                 options: [0, 1, 2].map { ($0, "最多 \($0) 位") }, reduce: model.reduceTransparency)
+                    Text("速率自动选择 B/s、KB/s、MB/s 或 GB/s。设置会自动保存。")
                         .font(.caption).foregroundStyle(.secondary)
+                    Toggle("固定窗口", isOn: $model.pinWindows).toggleStyle(.switch)
+                        .accessibilityIdentifier("pinWindows")
+                    Text("关闭时，切换到其他应用会收起窗口；开启后保持显示。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("减少透明度", isOn: $model.reduceTransparency).toggleStyle(.switch)
+                    Divider()
+                    Text("背景效果").font(.headline)
+                    SettingsMenu(title: "调整区域", selection: $appearanceRegion,
+                                 options: AppearanceRegion.allCases.map { ($0, $0.rawValue) }, reduce: model.reduceTransparency)
+                    VStack(spacing: 12) {
+                        appearanceSlider("通透度", value: $model.appearance[appearanceRegion].clarity, range: 0...1)
+                        appearanceSlider("透明度", value: $model.appearance[appearanceRegion].transparency, range: 0...1)
+                        appearanceSlider("模糊度", value: $model.appearance[appearanceRegion].blur, range: 0...30)
+                    }.disabled(model.reduceTransparency || systemReduce)
+                    Text("通透度调整底色浓淡，透明度调整背景可见程度，模糊度调整背景模糊半径。文字和图表保持清晰。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if model.reduceTransparency || systemReduce {
+                        Text("减少透明度已开启，背景效果暂不生效。关闭后恢复自定义效果。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Button("恢复本区域") { model.appearance[appearanceRegion] = SurfaceAppearance() }
+                        Spacer()
+                        Button("恢复全部背景") { model.appearance = AppearanceSettings() }
+                    }
+                    if !model.reduceTransparency && !systemReduce {
+                        BackdropStatus(diagnostics: model.backdropDiagnostics)
+                    }
+                    Text("设置只影响本应用。").font(.caption).foregroundStyle(.secondary)
                 }
-                HStack {
-                    Button("恢复本区域") { model.appearance[appearanceRegion] = SurfaceAppearance() }
-                    Spacer()
-                    Button("恢复全部背景") { model.appearance = AppearanceSettings() }
-                }
-                if !model.reduceTransparency && !systemReduce {
-                    BackdropStatus(diagnostics: model.backdropDiagnostics)
-                }
-            }.font(.system(size: 12)).padding(14)
-                .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
-        }.frame(maxHeight: 560)
+            }.frame(maxHeight: 560)
+        }.font(.system(size: 12)).padding(18).frame(width: 350)
             .environment(\.monitorAppearance, model.appearance)
     }
     private func appearanceSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
@@ -208,14 +216,15 @@ struct MonitorSettings: View {
         }
     }
 }
-struct Trend: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+struct Trend: View, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.range == rhs.range && lhs.mini == rhs.mini && lhs.snapshot.hasSameChart(as: rhs.snapshot)
+    }
     @Environment(\.colorScheme) private var colorScheme
     private var chartColor: Color { colorScheme == .dark ? darkMetricColor : .blue }
     let snapshot: Snapshot
     let range: HistoryRange
     var mini = false
-    @State private var revealed = false
     var body: some View {
         let samples = snapshot.samples(range, limit: mini ? 160 : 480)
         let plotStart = snapshot.plotStart(range)
@@ -260,13 +269,6 @@ struct Trend: View {
                     }
                 }
                 .padding(.vertical, mini ? 0 : 8)
-                .mask(alignment: .leading) {
-                    Rectangle().scaleEffect(x: revealed || reduceMotion ? 1 : 0, anchor: .leading)
-                }
-                .onAppear {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.55)) { revealed = true }
-                }
-                .onDisappear { revealed = false }
                 if !mini {
                     HStack {
                         Text(plotStart <= -1 ? "−\((-plotStart).formatted(.number.precision(.fractionLength(0...1)))) 分钟" : "−\(Int(-plotStart * 60)) 秒")
@@ -281,7 +283,10 @@ struct Trend: View {
         .accessibilityLabel("\(snapshot.metric.rawValue)，最近 \(range.label)，\(snapshot.missingReason ?? snapshot.reading)")
     }
 }
-struct DetailSeriesChart: View {
+struct DetailSeriesChart: View, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.range == rhs.range && lhs.snapshot.hasSameChart(as: rhs.snapshot)
+    }
     let snapshot: Snapshot
     let range: HistoryRange
     static let colors: [String: Color] = ["用户": .blue, "系统": .orange, "设备": .blue,
@@ -340,7 +345,10 @@ struct DetailSeriesChart: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
-struct MemorySeriesCharts: View {
+struct MemorySeriesCharts: View, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.range == rhs.range && lhs.reduce == rhs.reduce && lhs.snapshot.hasSameChart(as: rhs.snapshot)
+    }
     let snapshot: Snapshot
     let range: HistoryRange
     let reduce: Bool
@@ -495,7 +503,7 @@ struct Overview: View {
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
                     .accessibilityLabel("概览设置")
                     .popover(isPresented: $showSettings) {
-                        MonitorSettings(model: model).padding(14).frame(width: 350)
+                        MonitorSettings(model: model, close: { showSettings = false })
                     }
                 Button(action: close) { Image(systemName: "xmark") }
                     .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
@@ -529,12 +537,12 @@ struct Overview: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(snapshot.number).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
                         .contentTransition(.numericText(value: snapshot.value ?? 0))
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: snapshot.value)
                     if snapshot.value != nil { Text(snapshot.unit).font(.caption) }
                     Spacer(minLength: 0)
                 }
                 Text(snapshot.status).font(.system(size: 11)).lineLimit(2)
-                Trend(snapshot: snapshot, range: model.range, mini: true).frame(height: 25)
+                Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: 25)
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(RoundedRectangle(cornerRadius: 22))
         }.modifier(GlassButton(reduce: model.reduceTransparency, card: true))
@@ -564,24 +572,50 @@ struct WindowGlass: ViewModifier {
             }
     }
 }
+// 一次只保留一页前景；快速切换由 .task(id:) 取消旧任务，背景不参与过渡。
+@MainActor final class MetricPageTransition: ObservableObject {
+    @Published private(set) var metric: Metric
+    @Published private(set) var visible = true
+    init(metric: Metric) { self.metric = metric }
+    func show(_ target: Metric, animated: Bool) async {
+        guard !Task.isCancelled else { return }
+        guard animated, metric != target else {
+            metric = target
+            withAnimation(animated ? .easeOut(duration: 0.16) : nil) { visible = true }
+            return
+        }
+        withAnimation(.easeOut(duration: 0.09)) { visible = false }
+        do { try await Task.sleep(for: .milliseconds(90)) }
+        catch { return }
+        guard !Task.isCancelled else { return }
+        metric = target
+        withAnimation(.easeOut(duration: 0.16)) { visible = true }
+    }
+}
+
 struct Details: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var systemReduce
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: MonitorModel
     private var metricColor: Color { colorScheme == .dark ? darkMetricColor : .accentColor }
-    @State private var columns: NavigationSplitViewVisibility = .all
-    @State private var glowMetric: Metric?
-    @State private var glowVisible = false
-    @State private var glowGeneration = 0
+    @StateObject private var pageTransition: MetricPageTransition
+    @State private var sidebarVisible = true
     @State private var showSettings = false
-    @State private var collapsedClusters: Set<Int> = []
+    @State private var expandedClusters: Set<Int> = []
     let showOverview: () -> Void
     let close: () -> Void
 
+    init(model: MonitorModel, showOverview: @escaping () -> Void, close: @escaping () -> Void) {
+        self.model = model
+        self.showOverview = showOverview
+        self.close = close
+        _pageTransition = StateObject(wrappedValue: MetricPageTransition(metric: model.metric))
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            if columns != .detailOnly {
+            if sidebarVisible {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("本机资源").font(.caption.weight(.medium)).foregroundStyle(.primary)
@@ -603,9 +637,15 @@ struct Details: View {
                         }.modifier(GlassButton(reduce: model.reduceTransparency, translucent: true))
                             .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.025 + Double(index) * 0.02))
                             .overlay {
-                                if glowMetric == metric, !reduceMotion {
-                                    Capsule().stroke(metricColor.opacity(glowVisible ? 0.5 : 0), lineWidth: 2)
-                                        .scaleEffect(glowVisible ? 1 : 1.10)
+                                if !reduceMotion {
+                                    Capsule().strokeBorder(metricColor.opacity(0.7), lineWidth: 1.5)
+                                        .shadow(color: metricColor.opacity(0.45), radius: 5)
+                                        .phaseAnimator([0.0, 1.0, 0.0], trigger: model.metric) { glow, phase in
+                                            glow.opacity(model.metric == metric && model.detailsPresented ? phase : 0)
+                                                .scaleEffect(1 + phase * 0.025)
+                                        } animation: { phase in
+                                            .easeOut(duration: phase == 1 ? 0.12 : 0.28)
+                                        }
                                         .allowsHitTesting(false).accessibilityHidden(true)
                                 }
                             }
@@ -622,26 +662,26 @@ struct Details: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    if model.metric == .sensors {
+                    if pageTransition.metric == .sensors {
                         sensorPage
                     } else {
                     hero
-                    Trend(snapshot: model.snapshot(model.metric), range: model.range)
+                    Trend(snapshot: model.snapshot(pageTransition.metric), range: model.range).equatable()
                         .frame(height: 180)
                     facts
-                    if model.metric == .cpu { cpuCores }
-                    if model.metric == .gpu { gpuAcceleration }
-                    if model.metric == .memory {
-                        MemorySeriesCharts(snapshot: model.snapshot(.memory), range: model.range, reduce: model.reduceTransparency)
+                    if pageTransition.metric == .cpu { cpuCores }
+                    if pageTransition.metric == .gpu { gpuAcceleration }
+                    if pageTransition.metric == .memory {
+                        MemorySeriesCharts(snapshot: model.snapshot(.memory), range: model.range, reduce: model.reduceTransparency).equatable()
                     } else {
-                        DetailSeriesChart(snapshot: model.snapshot(model.metric), range: model.range)
+                        DetailSeriesChart(snapshot: model.snapshot(pageTransition.metric), range: model.range).equatable()
                     }
                     Divider()
                     comparison
                     Divider()
                     breakdown
                     DisclosureGroup("口径说明") {
-                        Text(model.snapshot(model.metric).note)
+                        Text(model.snapshot(pageTransition.metric).note)
                             .font(.callout).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
                         Text("图表显示本次运行的数据，最多保留 24 小时。")
@@ -651,10 +691,11 @@ struct Details: View {
                     }
                 }.padding(28).frame(maxWidth: 1000, alignment: .leading).frame(maxWidth: .infinity)
             }
-            // A different metric is a new detail page. Reset only its scroll subtree;
-            // live sample updates, range, theme and sidebar state retain identity.
-            .id(model.metric)
-            .transition(reduceMotion ? .identity : .opacity.combined(with: .offset(y: 6)))
+            // 切换指标时重置滚动位置；采样、范围和主题更新保留当前页面状态。
+            .id(pageTransition.metric)
+            .opacity(pageTransition.visible ? 1 : 0)
+            .offset(y: reduceMotion || pageTransition.visible ? 0 : 6)
+            .allowsHitTesting(pageTransition.visible)
             .modifier(ControlMaterial(region: .cards, cornerRadius: 24, materialOpacity: 0.65, reduce: model.reduceTransparency))
             .modifier(GlassReveal(presented: model.detailsPresented, delay: 0.04))
             .navigationTitle("性能监控")
@@ -662,11 +703,11 @@ struct Details: View {
                 if #available(macOS 26.0, *) {
                     ToolbarItem(placement: .navigation) { sidebarToggle }
                         .sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .primaryAction) { toolbarActions }
+                    ToolbarItemGroup(placement: .primaryAction) { toolbarActions }
                         .sharedBackgroundVisibility(.hidden)
                 } else {
                     ToolbarItem(placement: .navigation) { sidebarToggle }
-                    ToolbarItem(placement: .primaryAction) { toolbarActions }
+                    ToolbarItemGroup(placement: .primaryAction) { toolbarActions }
                 }
             }
         }
@@ -676,74 +717,53 @@ struct Details: View {
         .frame(minWidth: 640, minHeight: 520)
         .modifier(WindowGlass(reduce: model.reduceTransparency || systemReduce, presented: model.detailsPresented, diagnostics: model.backdropDiagnostics, appearance: model.appearance[.details]))
         .environment(\.monitorAppearance, model.appearance)
+        .task(id: model.metric) {
+            await pageTransition.show(model.metric, animated: !reduceMotion && model.detailsPresented)
+        }
         .onExitCommand(perform: close)
     }
 
     private var sidebarToggle: some View {
         Button {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
-                columns = columns == .detailOnly ? .all : .detailOnly
+                sidebarVisible.toggle()
             }
         } label: {
-            Image(systemName: "sidebar.left").font(.system(size: 16)).frame(width: 36, height: 36)
-                .background(Circle().strokeBorder(Color.primary.opacity(0.15)))
-                .padding(4)
-                .contentShape(Circle())
-                .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
+            Image(systemName: "sidebar.left").font(.system(size: 16)).frame(width: 28, height: 28)
         }
-        .buttonStyle(.plain)
-        .help(columns == .detailOnly ? "展开侧栏" : "收起侧栏")
-        .accessibilityLabel(columns == .detailOnly ? "展开侧栏" : "收起侧栏")
+        .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
+        .help(sidebarVisible ? "收起侧栏" : "展开侧栏")
+        .accessibilityLabel(sidebarVisible ? "收起侧栏" : "展开侧栏")
         .accessibilityIdentifier("sidebarToggle")
         .keyboardShortcut("s", modifiers: [.command, .control])
     }
 
     private var toolbarActions: some View {
-        HStack(spacing: 4) {
+        Group {
             Button(action: showOverview) {
-                Image(systemName: "menubar.rectangle").font(.system(size: 16)).frame(width: 36, height: 36)
-                    .background(Circle().strokeBorder(Color.primary.opacity(0.15)))
-                    .contentShape(Circle())
+                Image(systemName: "menubar.rectangle").font(.system(size: 16)).frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
+            .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
             .help("显示紧凑概览").accessibilityLabel("显示概览")
             Button { showSettings.toggle() } label: {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 16)).frame(width: 36, height: 36)
-                    .background(Circle().strokeBorder(Color.primary.opacity(0.15)))
-                    .contentShape(Circle())
+                Image(systemName: "slider.horizontal.3").font(.system(size: 16)).frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
+            .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
             .help("监控设置").accessibilityLabel("设置")
             .popover(isPresented: $showSettings) {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack { Text("设置").font(.headline); Spacer(); Button("完成") { showSettings = false }.modifier(GlassButton(reduce: model.reduceTransparency)) }
-                    MonitorSettings(model: model)
-                    Text("设置只影响本应用。").font(.caption).foregroundStyle(.primary)
-                }.padding(18).frame(width: 350)
+                MonitorSettings(model: model, close: { showSettings = false })
             }
             Button(action: close) {
-                Image(systemName: "xmark").font(.system(size: 16)).frame(width: 36, height: 36)
-                    .contentShape(Circle())
+                Image(systemName: "xmark").font(.system(size: 16)).frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
+            .modifier(GlassButton(reduce: model.reduceTransparency, circular: true))
             .help("关闭详情").accessibilityLabel("关闭详情")
         }
-        .padding(4)
-        .modifier(ControlMaterial(cornerRadius: 22, reduce: model.reduceTransparency))
     }
 
     private func selectMetric(_ metric: Metric) {
         guard model.metric != metric else { return }
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { model.metric = metric }
-        guard !reduceMotion else { return }
-        glowGeneration += 1
-        let generation = glowGeneration
-        glowMetric = metric
-        glowVisible = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
-            guard generation == glowGeneration else { return }
-            withAnimation(.easeOut(duration: 0.42)) { glowVisible = false }
-        }
+        model.metric = metric
     }
 
     private var sensorPage: some View {
@@ -810,19 +830,18 @@ struct Details: View {
         }.font(.callout)
     }
     private var hero: some View {
-        let snapshot = model.snapshot(model.metric)
+        let snapshot = model.snapshot(pageTransition.metric)
         return VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center) {
-                Label(model.metric.rawValue, systemImage: model.metric.symbol).font(.system(size: 22, weight: .semibold))
+                Label(pageTransition.metric.rawValue, systemImage: pageTransition.metric.symbol).font(.system(size: 22, weight: .semibold))
                 Spacer(minLength: 12)
                 RangePicker(model: model)
             }
             HStack(alignment: .bottom) {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text(snapshot.number).font(.system(size: 48, weight: .light, design: .rounded)).monospacedDigit()
-                        .id(model.metric)
                         .contentTransition(.numericText(value: snapshot.value ?? 0))
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: snapshot.value)
                     if snapshot.value != nil { Text(snapshot.unit).font(.title3).foregroundStyle(.primary) }
                 }
                 Spacer()
@@ -835,7 +854,7 @@ struct Details: View {
     }
     private var facts: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], alignment: .leading, spacing: 10) {
-            ForEach(model.snapshot(model.metric).facts) { fact in
+            ForEach(model.snapshot(pageTransition.metric).facts) { fact in
                 VStack(alignment: .leading, spacing: 7) {
                     Text(fact.label).font(.caption).foregroundStyle(.primary)
                     Text(fact.value).font(.system(size: 17, weight: .medium)).monospacedDigit()
@@ -854,8 +873,8 @@ struct Details: View {
                     let kind = cluster.indices.first.flatMap { index in model.coreLabels.flatMap { index < $0.count ? $0[index] : nil } }
                     let sameKind = kind != nil && cluster.indices.allSatisfy { model.coreLabels?[$0] == kind }
                     let total = cluster.total(cores)
-                    DisclosureGroup(isExpanded: Binding(get: { !collapsedClusters.contains(cluster.id) }, set: { expanded in
-                        if expanded { collapsedClusters.remove(cluster.id) } else { collapsedClusters.insert(cluster.id) }
+                    DisclosureGroup(isExpanded: Binding(get: { expandedClusters.contains(cluster.id) }, set: { expanded in
+                        if expanded { expandedClusters.insert(cluster.id) } else { expandedClusters.remove(cluster.id) }
                     })) {
                         coreGrid(cluster.indices, cores: cores).padding(.top, 12)
                     } label: {
@@ -935,8 +954,8 @@ struct Details: View {
                             Text(metric.rawValue).font(.caption).foregroundStyle(.primary)
                             Text(snapshot.reading).font(.system(size: 14, weight: .medium)).monospacedDigit()
                                 .contentTransition(.numericText(value: snapshot.value ?? 0))
-                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: snapshot.value)
-                            Trend(snapshot: snapshot, range: model.range, mini: true).frame(height: 25)
+                                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: snapshot.value)
+                            Trend(snapshot: snapshot, range: model.range, mini: true).equatable().frame(height: 25)
                         }.padding(11).frame(maxWidth: .infinity, alignment: .leading)
                             .background(model.metric == metric ? metricColor.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain).accessibilityLabel("对照\(metric.rawValue)，\(snapshot.reading)")
@@ -946,14 +965,15 @@ struct Details: View {
         }
     }
     private var breakdown: some View {
-        let snapshot = model.snapshot(model.metric)
+        let snapshot = model.snapshot(pageTransition.metric)
+        let rows = snapshot.rows
         return VStack(alignment: .leading, spacing: 12) {
             Text("细分信息")
                 .font(.system(size: 13, weight: .medium))
-            if snapshot.rows.isEmpty {
+            if rows.isEmpty {
                 Text(snapshot.missingReason ?? "暂无数据").font(.callout).foregroundStyle(.primary)
             } else {
-                ForEach(snapshot.rows) { row in
+                ForEach(rows) { row in
                     HStack { Text(row.label).foregroundStyle(.primary); Spacer(); Text(row.value).monospacedDigit() }.font(.callout)
                 }
             }

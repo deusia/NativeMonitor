@@ -56,9 +56,10 @@ final class WindowChrome: NSView {
         guard let window else { return }
         let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
         let wasResizing = !edges.isEmpty
-        edges = ResizeEdges.at(point, in: bounds)
+        let updatedEdges = ResizeEdges.at(point, in: bounds)
+        if updatedEdges != edges { needsDisplay = true }
+        edges = updatedEdges
         if wasResizing && edges.isEmpty { NSCursor.arrow.set() }
-        needsDisplay = true
         if #available(macOS 15.0, *), !edges.isEmpty {
             let position: NSCursor.FrameResizePosition
             switch edges {

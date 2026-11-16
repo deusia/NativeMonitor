@@ -22,7 +22,7 @@ final class SystemReaderTests: XCTestCase {
         XCTAssertNil(old.percentages(since: old))
     }
     func testLocalSystemSources() throws {
-        XCTAssertNotNil(SystemReader.cpu())
+        XCTAssertFalse(try XCTUnwrap(SystemReader.cpuCores()).isEmpty)
         let memory = try XCTUnwrap(SystemReader.memory())
         XCTAssertGreaterThan(memory.total, 0)
         XCTAssertLessThanOrEqual(memory.used, memory.total)

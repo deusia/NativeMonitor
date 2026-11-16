@@ -5,6 +5,7 @@ import Combine
 final class StatusReadout: NSStackView {
     private let fields = (0..<3).map { _ in NSTextField(labelWithString: "—") }
     private var widths: [NSLayoutConstraint] = []
+    private var configuration: (scale: CPUScale, precision: Int)?
 
     init(cpuScale: CPUScale = .total, precision: Int = 1) {
         super.init(frame: .zero)
@@ -22,11 +23,14 @@ final class StatusReadout: NSStackView {
         }
         // 接收速率从列首开始显示，避免短读数左侧出现大片空白。
         fields[2].alignment = .left
-        configure(cpuScale: cpuScale, precision: precision)
+        _ = configure(cpuScale: cpuScale, precision: precision)
     }
 
-    private func configure(cpuScale: CPUScale, precision: Int) {
+    private func configure(cpuScale: CPUScale, precision: Int) -> Bool {
         let digits = max(0, min(2, precision))
+        // 采样只更新文字；口径或精度变化时才重新测量列宽。
+        guard configuration?.scale != cpuScale || configuration?.precision != digits else { return false }
+        configuration = (cpuScale, digits)
         // 只为当前设置预留空间；切换设置可以调整宽度，采样更新不能带动菜单栏移动。
         let cpuMaximum = cpuScale == .average ? 100 : ProcessInfo.processInfo.processorCount * 100
         let cpu = Double(cpuMaximum).formatted(.number.precision(.fractionLength(digits))) + "%"
@@ -42,14 +46,16 @@ final class StatusReadout: NSStackView {
             let width = samples.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
             widths[index].constant = ceil(width) + 2
         }
+        return true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     // 文本只负责显示，让整个区域继续由原生菜单栏按钮处理点击和高亮。
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func update(_ values: [String], cpuScale: CPUScale, precision: Int) {
-        configure(cpuScale: cpuScale, precision: precision)
-        for (field, value) in zip(fields, values) { field.stringValue = value }
+    @discardableResult func update(_ values: [String], cpuScale: CPUScale, precision: Int) -> Bool {
+        let changed = configure(cpuScale: cpuScale, precision: precision)
+        for (field, value) in zip(fields, values) where field.stringValue != value { field.stringValue = value }
+        return changed
     }
 
     @MainActor static func values(_ model: MonitorModel) -> [String] {
@@ -106,7 +112,7 @@ final class OverviewPanel: NSPanel {
             ])
         }
         status.button?.setAccessibilityLabel("性能监控，点击打开概览")
-        status.button?.toolTip = "性能监控"
+        status.button?.toolTip = "CPU / 内存 / 接收"
         overviewPanel = OverviewPanel(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
         overviewPanel.isOpaque = false
         overviewPanel.backgroundColor = .clear
@@ -236,10 +242,10 @@ final class OverviewPanel: NSPanel {
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(sender); return false }
     func updateStatus() {
         let values = StatusReadout.values(model)
-        statusReadout.update(values, cpuScale: model.cpuScale, precision: model.precision)
-        status.length = statusReadout.fittingSize.width + 16
+        if statusReadout.update(values, cpuScale: model.cpuScale, precision: model.precision) {
+            status.length = statusReadout.fittingSize.width + 16
+        }
         status.button?.setAccessibilityValue(values.joined(separator: "  "))
-        status.button?.toolTip = "CPU / 内存 / 接收"
     }
     @objc func toggleOverview() { overviewPanel.isVisible && !closingWindows.contains(ObjectIdentifier(overviewPanel)) ? hideOverview() : showOverview() }
     func hideOverview() {
@@ -252,11 +258,8 @@ final class OverviewPanel: NSPanel {
         content.layoutSubtreeIfNeeded()
         let size = content.fittingSize
         let anchor = statusWindow.convertToScreen(button.convert(button.bounds, to: nil))
-        let visible = screen.visibleFrame
-        let anchorReady = screen.frame.contains(NSPoint(x: anchor.midX, y: anchor.midY)) && anchor.midY >= visible.maxY
-        let origin = NSPoint(x: anchorReady ? min(max(anchor.midX - size.width / 2, visible.minX + 8), visible.maxX - size.width - 8) : visible.maxX - size.width - 8,
-                             y: max(visible.minY + 8, (anchorReady ? anchor.minY : visible.maxY) - size.height - 6))
-        present(overviewPanel, frame: NSRect(origin: origin, size: size))
+        present(overviewPanel, frame: Self.overviewFrame(size: size, anchor: anchor,
+                                                       screen: screen.frame, visible: screen.visibleFrame))
         if outsideClickMonitor == nil {
             outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                 guard let self, !self.model.pinWindows else { return }
@@ -270,6 +273,13 @@ final class OverviewPanel: NSPanel {
                 self.hideOverview()
             }
         }
+    }
+    // 菜单栏自动隐藏或按钮尚未布局时使用屏幕右上角，避免跟随无效锚点跳动。
+    static func overviewFrame(size: NSSize, anchor: NSRect, screen: NSRect, visible: NSRect) -> NSRect {
+        let anchorReady = screen.contains(NSPoint(x: anchor.midX, y: anchor.midY)) && anchor.midY >= visible.maxY
+        let origin = NSPoint(x: anchorReady ? min(max(anchor.midX - size.width / 2, visible.minX + 8), visible.maxX - size.width - 8) : visible.maxX - size.width - 8,
+                             y: max(visible.minY + 8, (anchorReady ? anchor.minY : visible.maxY) - size.height - 6))
+        return NSRect(origin: origin, size: size)
     }
     static func shouldDismissOverview(at point: NSPoint, panel: NSRect, status: NSRect?) -> Bool {
         !panel.contains(point) && !(status?.contains(point) ?? false)
