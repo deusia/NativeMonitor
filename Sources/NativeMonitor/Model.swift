@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import OSLog
 
 enum Metric: String, CaseIterable, Identifiable {
     case cpu = "CPU", gpu = "GPU", memory = "内存", disk = "磁盘", network = "网络", sensors = "传感器"
@@ -50,6 +51,43 @@ extension Sample {
 }
 struct Fact: Identifiable { let label: String; let value: String; var id: String { label } }
 struct TimedValue { let date: Date; let value: Double; var series: [String: Double] = [:] }
+extension Array where Element == TimedValue {
+    // 历史按时间递增；二分定位窗口，避免查看 5 分钟数据时扫描全天样本。
+    func lowerBound(_ date: Date, strictlyAfter: Bool = false) -> Int {
+        var lower = 0, upper = count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if self[middle].date < date || (strictlyAfter && self[middle].date == date) {
+                lower = middle + 1
+            } else { upper = middle }
+        }
+        return lower
+    }
+}
+
+// 超时仅报告一次；阻塞调用结束前不派发新请求，停止后丢弃未完成结果。
+struct SamplingRequest {
+    private(set) var inFlight = false
+    private var startedAt: TimeInterval?
+    mutating func begin(at uptime: TimeInterval) -> Bool {
+        guard !inFlight else { return false }
+        inFlight = true
+        startedAt = uptime
+        return true
+    }
+    mutating func timedOut(at uptime: TimeInterval, after timeout: TimeInterval) -> Bool {
+        guard let startedAt, uptime - startedAt > timeout else { return false }
+        self.startedAt = nil
+        return true
+    }
+    mutating func finish() -> Bool {
+        let accepted = startedAt != nil
+        inFlight = false
+        startedAt = nil
+        return accepted
+    }
+    mutating func invalidate() { startedAt = nil }
+}
 struct LinePoint: Identifiable {
     let name: String
     let segment: String
@@ -81,6 +119,7 @@ struct MetricReading {
 struct Snapshot {
     let metric: Metric
     var current: MetricReading?
+    // 由 MonitorModel 保证时间递增，范围查询依赖此顺序。
     var history: [TimedValue] = []
     var now = Date()
     var cpuScale: CPUScale = .total
@@ -107,12 +146,18 @@ struct Snapshot {
     }
     var rows: [Fact] {
         var result = current?.rows ?? []
-        let values = samples(.long).map(\.value)
-        if !values.isEmpty {
-            let average = values.reduce(0, +) / Double(values.count)
-            let peak = values.max() ?? 0
-            result.append(Fact(label: "近 30 分钟均值", value: ValueFormat.reading(average, metric: metric, precision: precision)))
-            result.append(Fact(label: "近 30 分钟峰值", value: ValueFormat.reading(peak, metric: metric, precision: precision)))
+        if value != nil {
+            var sum = 0.0, peak = 0.0, count = 0
+            for item in historyWindow(.long) {
+                let value = item.value * cpuFactor
+                sum += value
+                peak = max(peak, value)
+                count += 1
+            }
+            if count > 0 {
+                result.append(Fact(label: "近 30 分钟均值", value: ValueFormat.reading(sum / Double(count), metric: metric, precision: precision)))
+                result.append(Fact(label: "近 30 分钟峰值", value: ValueFormat.reading(peak, metric: metric, precision: precision)))
+            }
         }
         return result
     }
@@ -121,7 +166,7 @@ struct Snapshot {
         if metric == .gpu { return 100 }
         guard value != nil else { return 0.001 }
         var peak = value ?? 0
-        for item in history where isVisible(item, in: range) {
+        for item in historyWindow(range) {
             peak = max(peak, item.value * cpuFactor)
             for value in item.series.values { peak = max(peak, value * cpuFactor) }
         }
@@ -137,46 +182,56 @@ struct Snapshot {
         case .network: "速率为处于运行状态的 en 接口接收或发送字节之和，包含本地网络流量；不统计 VPN、虚拟及其他名称接口，不能视为互联网流量。接口变化时重新建立速率基线。"
         }
     }
-    private func isVisible(_ item: TimedValue, in range: HistoryRange) -> Bool {
-        let age = now.timeIntervalSince(item.date)
-        return age >= 0 && age <= Double(range.rawValue * 60)
+    private func historyWindow(_ range: HistoryRange) -> ArraySlice<TimedValue> {
+        let start = history.lowerBound(now.addingTimeInterval(-Double(range.rawValue * 60)))
+        let end = history.lowerBound(now, strictlyAfter: true)
+        return history[start..<end]
+    }
+    // 采样时间是曲线的版本；其他指标更新和侧栏动画无需重新准备这条曲线。
+    func hasSameChart(as other: Snapshot) -> Bool {
+        metric == other.metric && current?.date == other.current?.date &&
+        current?.value == other.current?.value && missingReason == other.missingReason &&
+        cpuScale == other.cpuScale && cpuFactor == other.cpuFactor && precision == other.precision && history.count == other.history.count
     }
     func seriesSamples(_ range: HistoryRange, limit: Int? = nil) -> [LinePoint] {
         guard value != nil else { return [] }
-        var segments: [String: Int] = [:], active = Set<String>()
-        var series: [String: [Sample]] = [:]
-        var names: [String: String] = [:]
-        for item in history where isVisible(item, in: range) {
-            let minute = item.date.timeIntervalSince(now) / 60
-            let currentNames = Set(item.series.keys)
-            for name in active.subtracting(currentNames) { segments[name, default: 0] += 1 }
+        var active: [String: Int] = [:]
+        var segments: [(name: String, ordinal: Int, samples: [Sample])] = []
+        var counts: [String: Int] = [:]
+        for item in historyWindow(range) {
+            for name in Array(active.keys) where item.series[name] == nil { active.removeValue(forKey: name) }
             for (name, value) in item.series {
-                let segment = "\(name)-\(segments[name, default: 0])"
-                names[segment] = name
-                series[segment, default: []].append(Sample(id: item.date.timeIntervalSinceReferenceDate,
-                                                          minute: minute, value: value * cpuFactor))
+                let index: Int
+                if let existing = active[name] { index = existing }
+                else {
+                    index = segments.count
+                    let ordinal = counts[name, default: 0]
+                    segments.append((name, ordinal, []))
+                    counts[name] = ordinal + 1
+                    active[name] = index
+                }
+                segments[index].samples.append(Sample(id: item.date.timeIntervalSinceReferenceDate,
+                                                     minute: item.date.timeIntervalSince(now) / 60, value: value * cpuFactor))
             }
-            active = currentNames
         }
-        // 分段后再压缩，避免将缺失前后的曲线接起来；只为最终绘图点构造标识符。
-        return series.keys.sorted().flatMap { segment -> [LinePoint] in
-            let samples = series[segment]!
-            return (limit.map { Sample.reduced(samples, limit: $0) } ?? samples).map {
-                LinePoint(name: names[segment]!, segment: segment, minute: $0.minute,
+        // 分段后再压缩，只为最终绘图点构造字符串标识符。
+        return segments.flatMap { series -> [LinePoint] in
+            let segment = "\(series.name)-\(series.ordinal)"
+            return (limit.map { Sample.reduced(series.samples, limit: $0) } ?? series.samples).map {
+                LinePoint(name: series.name, segment: segment, minute: $0.minute,
                           value: $0.value, id: "\(segment)-\($0.id)")
             }
         }.sorted { $0.minute < $1.minute }
     }
     func plotStart(_ range: HistoryRange) -> Double {
-        guard value != nil, let first = history.first(where: { isVisible($0, in: range) }) else {
+        guard value != nil, let first = historyWindow(range).first else {
             return -Double(range.rawValue)
         }
         return min(-1.0 / 6, first.date.timeIntervalSince(now) / 60)
     }
     func samples(_ range: HistoryRange, limit: Int? = nil) -> [Sample] {
         guard value != nil else { return [] }
-        let samples = history.compactMap { item -> Sample? in
-            guard isVisible(item, in: range) else { return nil }
+        let samples = historyWindow(range).map { item in
             return Sample(id: item.date.timeIntervalSinceReferenceDate,
                           minute: item.date.timeIntervalSince(now) / 60, value: item.value * cpuFactor)
         }
@@ -194,25 +249,23 @@ struct Snapshot {
     @Published var precision: Int { didSet { defaults.set(precision, forKey: "precision") } }
     @Published var interval: Int { didSet {
         defaults.set(interval, forKey: "samplingInterval")
-        if timer != nil { stop(); schedule() }
+        if timer != nil { timer?.invalidate(); schedule() }
     } }
     @Published var overviewPresented = false
     @Published var detailsPresented = false
     let backdropDiagnostics = BackdropDiagnostics()
     @Published private(set) var readings: [Metric: MetricReading] = [:]
-    @Published private(set) var histories: [Metric: [TimedValue]] = [:]
-    @Published private(set) var now = Date()
+    private(set) var histories: [Metric: [TimedValue]] = [:]
+    private(set) var now = Date()
     private var timer: Timer?
-    private var inFlight = false
-    private var requestDate: Date?
-    private var gpuInFlight = false
-    private var gpuRequestDate: Date?
+    private var systemRequest = SamplingRequest()
+    private var gpuRequest = SamplingRequest()
     @Published private(set) var sensors: [SensorReading] = []
     @Published private(set) var sensorStatus = "等待传感器采样"
-    private var sensorInFlight = false
-    private var sensorRequestDate: Date?
+    private var sensorRequest = SamplingRequest()
     private let sensorQueue = DispatchQueue(label: "NativeMonitor.sensors", qos: .utility)
     private let collector = MonitorCollector()
+    private let logger = Logger(subsystem: "local.ashen.NativeMonitor", category: "Sampling")
     private(set) var coreLabels: [String]?
     private(set) var coreClusters: [CPUCluster]?
     private var coreLabelsCount = 0
@@ -228,6 +281,7 @@ struct Snapshot {
         let storedInterval = defaults.integer(forKey: "samplingInterval")
         interval = [1, 2, 5].contains(storedInterval) ? storedInterval : 2
     }
+    deinit { timer?.invalidate() }
     func start() {
         guard timer == nil else { return }
         refresh()
@@ -240,61 +294,87 @@ struct Snapshot {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
-    func stop() { timer?.invalidate(); timer = nil }
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        systemRequest.invalidate()
+        gpuRequest.invalidate()
+        sensorRequest.invalidate()
+    }
     private func refresh() {
-        now = Date()
-        if inFlight, requestDate.map({ now.timeIntervalSince($0) > Double(max(6, interval * 3)) }) == true {
-            for metric in Metric.allCases where metric != .gpu && metric != .sensors { setUnavailable(metric) }
+        let date = Date(), uptime = ProcessInfo.processInfo.systemUptime
+        let timeout = Double(max(6, interval * 3))
+        var unavailable: [Metric: MetricReading] = [:]
+        if systemRequest.timedOut(at: uptime, after: timeout) {
+            logger.warning("系统采样超时，等待当前调用结束")
+            for metric in [Metric.cpu, .memory, .disk, .network] {
+                unavailable[metric] = MetricReading(date: date, value: nil, status: "采样超时，等待恢复", facts: [], rows: [])
+            }
         }
-        if gpuInFlight, gpuRequestDate.map({ now.timeIntervalSince($0) > Double(max(6, interval * 3)) }) == true { setUnavailable(.gpu) }
-        if sensorInFlight, sensorRequestDate.map({ now.timeIntervalSince($0) > Double(max(6, interval * 3)) }) == true {
-            sensors = []; sensorStatus = "传感器采样超时"
+        if gpuRequest.timedOut(at: uptime, after: timeout) {
+            logger.warning("GPU 采样超时，等待当前调用结束")
+            unavailable[.gpu] = MetricReading(date: date, value: nil, status: "采样超时，等待恢复", facts: [], rows: [])
+        }
+        if !unavailable.isEmpty { record(unavailable, at: date) }
+        if sensorRequest.timedOut(at: uptime, after: timeout) {
+            logger.warning("传感器采样超时，等待当前调用结束")
+            sensors = []
+            sensorStatus = "传感器采样超时，等待恢复"
         }
         let collector = collector
-        if !sensorInFlight {
-            sensorInFlight = true
-            sensorRequestDate = now
+        if sensorRequest.begin(at: uptime) {
             sensorQueue.async { [weak self] in
                 let readings = collector.readSensors()
                 DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.sensorInFlight = false
-                    self.sensors = readings ?? []
-                    self.sensorStatus = readings == nil ? "传感器数据不可用" : readings!.isEmpty ? "未发现可读取的温度或风扇传感器" : ""
+                    guard let self, self.sensorRequest.finish() else { return }
+                    let sensors = readings ?? []
+                    let status = readings == nil ? "传感器数据不可用" : sensors.isEmpty ? "未发现可读取的温度或风扇传感器" : ""
+                    if self.sensors != sensors { self.sensors = sensors }
+                    if self.sensorStatus != status { self.sensorStatus = status }
                 }
             }
         }
-        if !inFlight {
-            inFlight = true
-            requestDate = now
+        if systemRequest.begin(at: uptime) {
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 let results = collector.read()
                 DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.inFlight = false
-                    for (metric, reading) in results { self.record(reading, for: metric) }
+                    guard let self, self.systemRequest.finish() else { return }
+                    self.record(results)
                 }
             }
         }
-        if !gpuInFlight {
-            gpuInFlight = true
-            gpuRequestDate = now
+        if gpuRequest.begin(at: uptime) {
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 let reading = collector.readGPU()
                 DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.gpuInFlight = false
-                    self.record(reading, for: .gpu)
+                    guard let self, self.gpuRequest.finish() else { return }
+                    self.record([.gpu: reading])
                 }
             }
         }
     }
-    private func setUnavailable(_ metric: Metric) {
-        readings[metric] = MetricReading(date: now, value: nil, status: "采样超时，请重新打开程序", facts: [], rows: [])
-        histories[metric] = []
+    // 一批读数完成后只发布一次，界面不会看到读数与历史尚未同步的中间状态。
+    func record(_ results: [Metric: MetricReading], at date: Date = Date()) {
+        guard !results.isEmpty else { return }
+        now = date
+        let validated = results.mapValues { reading -> MetricReading in
+            let age = date.timeIntervalSince(reading.date)
+            guard age >= 0, age <= Double(max(6, interval * 3)),
+                  reading.value.map({ $0.isFinite && $0 >= 0 }) ?? true,
+                  reading.series.values.allSatisfy({ $0.isFinite && $0 >= 0 }) else {
+                return MetricReading(date: date, value: nil, status: "采样已过期或数据无效，等待下次采样", facts: [], rows: [])
+            }
+            return reading
+        }
+        for (metric, reading) in validated {
+            if reading.status == "采样已过期或数据无效，等待下次采样", readings[metric]?.status != reading.status {
+                logger.warning("丢弃过期或无效采样：\(metric.rawValue, privacy: .public)")
+            }
+            appendHistory(reading, for: metric)
+        }
+        readings.merge(validated) { _, new in new }
     }
-    private func record(_ reading: MetricReading, for metric: Metric) {
-        now = Date()
+    private func appendHistory(_ reading: MetricReading, for metric: Metric) {
         if metric == .cpu {
             if let previous = readings[metric], previous.cores.count != reading.cores.count { histories[metric] = [] }
             if !reading.cores.isEmpty && coreLabelsCount != reading.cores.count {
@@ -304,13 +384,18 @@ struct Snapshot {
                 coreClusters = topology.clusters
             }
         }
-        readings[metric] = reading
         if let value = reading.value {
-            histories[metric, default: []].removeAll { now.timeIntervalSince($0.date) > Double(HistoryRange.day.rawValue * 60) }
+            // 系统时间回拨时重新建段，确保二分查找依赖的时间顺序成立。
+            if let last = histories[metric]?.last, reading.date <= last.date { histories[metric] = [] }
+            if let first = histories[metric]?.first,
+               first.date < now.addingTimeInterval(-Double(HistoryRange.day.rawValue * 60)) {
+                let expired = histories[metric]!.lowerBound(now.addingTimeInterval(-Double(HistoryRange.day.rawValue * 60)))
+                histories[metric]!.removeFirst(expired)
+            }
             histories[metric, default: []].append(TimedValue(date: reading.date, value: value, series: reading.series))
         } else { histories[metric] = [] }
     }
     func snapshot(_ metric: Metric) -> Snapshot {
-        Snapshot(metric: metric, current: readings[metric], history: histories[metric] ?? [], now: now, cpuScale: cpuScale, precision: precision)
+        Snapshot(metric: metric, current: readings[metric], history: histories[metric] ?? [], now: readings[metric]?.date ?? now, cpuScale: cpuScale, precision: precision)
     }
 }

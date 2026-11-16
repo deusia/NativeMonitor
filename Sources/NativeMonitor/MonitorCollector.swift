@@ -8,7 +8,9 @@ final class MonitorCollector: @unchecked Sendable {
     private var sensorReader: SensorReader?
     func readSensors() -> [SensorReading]? {
         if sensorReader == nil { sensorReader = SensorReader() }
-        return sensorReader?.read()
+        let readings = sensorReader?.read()
+        if readings == nil { sensorReader = nil }
+        return readings
     }
     private var anePower: ANEPowerReader?
     private var aneRetryAfter: TimeInterval = 0

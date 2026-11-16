@@ -74,17 +74,6 @@ enum CoreTopology {
 }
 
 struct SystemReader {
-    static func cpu() -> CPUCounters? {
-        var info = host_cpu_load_info()
-        var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
-        let result = withUnsafeMutablePointer(to: &info) { pointer in
-            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count)
-            }
-        }
-        guard result == KERN_SUCCESS else { return nil }
-        return CPUCounters(user: UInt64(info.cpu_ticks.0), system: UInt64(info.cpu_ticks.1), idle: UInt64(info.cpu_ticks.2), nice: UInt64(info.cpu_ticks.3))
-    }
     static func cpuCores() -> [CPUCounters]? {
         var processorCount: natural_t = 0
         var info: processor_info_array_t?

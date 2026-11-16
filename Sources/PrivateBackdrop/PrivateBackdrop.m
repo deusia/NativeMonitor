@@ -9,10 +9,12 @@ static CGImageRef Mask(size_t w, size_t h) {
     if(w==0 || h==0 || w>4096 || h>4096) return NULL;
     NSMutableData *data = [NSMutableData dataWithLength:w*h*4];
     uint8_t *p=data.mutableBytes;
+    double fade=fmin(160, fmin(w,h)/3.);
     for(size_t y=0;y<h;y++) for(size_t x=0;x<w;x++) {
         double qx=fabs(x+.5-w/2.)-w/2.+64, qy=fabs(y+.5-h/2.)-h/2.+64;
-        double d=hypot(fmax(qx,0),fmax(qy,0))+fmin(fmax(qx,qy),0)-64;
-        double t=fmin(1,fmax(0,-d/fmin(160, fmin(w,h)/3.)));
+        // 仅圆角外侧需要计算斜距，绝大多数像素使用直边距离。
+        double d=(qx>0 && qy>0 ? hypot(qx,qy) : fmax(qx,qy))-64;
+        double t=fmin(1,fmax(0,-d/fade));
         uint8_t a=round(255*t*t*(3-2*t));
         size_t k=(y*w+x)*4; p[k]=a;p[k+1]=a;p[k+2]=a;p[k+3]=a;
     }

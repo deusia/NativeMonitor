@@ -43,7 +43,7 @@ final class OverviewPanel: NSPanel {
         status.button?.action = #selector(toggleOverview)
         status.button?.font = statusFont
         status.button?.setAccessibilityLabel("性能监控，点击打开概览")
-        status.button?.toolTip = "性能监控"
+        status.button?.toolTip = "CPU / 内存 / 接收"
         overviewPanel = OverviewPanel(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
         overviewPanel.isOpaque = false
         overviewPanel.backgroundColor = .clear
@@ -161,8 +161,8 @@ final class OverviewPanel: NSPanel {
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(sender); return false }
     func updateStatus() {
-        status.button?.title = StatusReadout.title(model)
-        status.button?.toolTip = "CPU / 内存 / 接收"
+        let title = StatusReadout.title(model)
+        if status.button?.title != title { status.button?.title = title }
     }
     @objc func toggleOverview() { overviewPanel.isVisible && !closingWindows.contains(ObjectIdentifier(overviewPanel)) ? hideOverview() : showOverview() }
     func hideOverview() {
@@ -175,11 +175,8 @@ final class OverviewPanel: NSPanel {
         content.layoutSubtreeIfNeeded()
         let size = content.fittingSize
         let anchor = statusWindow.convertToScreen(button.convert(button.bounds, to: nil))
-        let visible = screen.visibleFrame
-        let anchorReady = screen.frame.contains(NSPoint(x: anchor.midX, y: anchor.midY)) && anchor.midY >= visible.maxY
-        let origin = NSPoint(x: anchorReady ? min(max(anchor.midX - size.width / 2, visible.minX + 8), visible.maxX - size.width - 8) : visible.maxX - size.width - 8,
-                             y: max(visible.minY + 8, (anchorReady ? anchor.minY : visible.maxY) - size.height - 6))
-        present(overviewPanel, frame: NSRect(origin: origin, size: size))
+        present(overviewPanel, frame: Self.overviewFrame(size: size, anchor: anchor,
+                                                       screen: screen.frame, visible: screen.visibleFrame))
         if outsideClickMonitor == nil {
             outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                 guard let self else { return }
@@ -193,6 +190,13 @@ final class OverviewPanel: NSPanel {
                 self.hideOverview()
             }
         }
+    }
+    // 菜单栏自动隐藏或按钮尚未布局时使用屏幕右上角，避免跟随无效锚点跳动。
+    static func overviewFrame(size: NSSize, anchor: NSRect, screen: NSRect, visible: NSRect) -> NSRect {
+        let anchorReady = screen.contains(NSPoint(x: anchor.midX, y: anchor.midY)) && anchor.midY >= visible.maxY
+        let origin = NSPoint(x: anchorReady ? min(max(anchor.midX - size.width / 2, visible.minX + 8), visible.maxX - size.width - 8) : visible.maxX - size.width - 8,
+                             y: max(visible.minY + 8, (anchorReady ? anchor.minY : visible.maxY) - size.height - 6))
+        return NSRect(origin: origin, size: size)
     }
     static func shouldDismissOverview(at point: NSPoint, panel: NSRect, status: NSRect?) -> Bool {
         !panel.contains(point) && !(status?.contains(point) ?? false)

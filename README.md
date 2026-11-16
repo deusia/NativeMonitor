@@ -38,7 +38,7 @@ GPU 字段来自 IORegistry 的 `IOAccelerator` / `PerformanceStatistics`，只�
 
 电池、无线和存储的部分键名参考 [VirtualSMC](https://github.com/acidanthera/VirtualSMC/blob/master/Docs/SMCSensorKeys.txt) 与 [MacMonitor](https://github.com/ryyansafar/MacMonitor/blob/main/SENSORS.md)，属于跨机型参考而非 M5 Max 的官方位置说明。核心簇测点不一定对应单个核心；附近测点不一定是部件内部温度。无法识别的键标为“部件未知”。
 
-系统指标、GPU 及传感器分别在后台采样，采样间隔可设为 1、2 或 5 秒；某一采样长时间阻塞时显示超时，并不重复堆积请求。历史仅保存在内存中，退出后消失。无网络上传或特权 helper。
+系统指标、GPU 及传感器分别在后台采样，采样间隔可设为 1、2 或 5 秒；某一采样长时间阻塞时只报告一次超时，并不重复堆积请求；超时或停止后的迟到结果会被丢弃，过期或非有限读数不会写入历史，传感器连接失效后自动重建。系统读数按批更新界面，短时间范围通过二分查找截取历史，其他指标更新不会重新准备当前曲线；系统时间回拨时重新建立对应历史。历史仅保存在内存中，退出后消失。无网络上传或特权 helper。
 
 ## 操作
 
