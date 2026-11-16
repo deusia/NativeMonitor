@@ -1,32 +1,58 @@
 import AppKit
 import SwiftUI
 import Combine
+import QuartzCore
 
-final class StatusReadoutValue: ObservableObject {
-    @Published var text = "—"
+struct StatusReadoutValue {
+    let number: String
+    let unit: String
+    var prefix = ""
+    var text: String { prefix + number + unit }
 }
 
-struct StatusReadoutText: View {
-    @ObservedObject var reading: StatusReadoutValue
-    let alignment: Alignment
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+final class StatusReadoutColumn: NSStackView {
+    let number = NSTextField(labelWithString: "—")
+    let unit = NSTextField(labelWithString: "")
+    let prefix = NSTextField(labelWithString: "")
+    var stringValue: String { prefix.stringValue + number.stringValue + unit.stringValue }
 
-    var body: some View {
-        Text(reading.text)
-            .font(.system(size: 11, weight: .medium)).monospacedDigit()
-            .contentTransition(.numericText())
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-            .clipped()
-            .transaction { if reduceMotion { $0.animation = nil } }
-            .accessibilityHidden(true)
+    init(leading: Bool) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 0
+        wantsLayer = true
+        let spacer = NSView()
+        if !leading { addArrangedSubview(spacer) }
+        for field in [prefix, number, unit] {
+            field.font = StatusReadout.font
+            field.setContentHuggingPriority(.required, for: .horizontal)
+            field.setContentCompressionResistancePriority(.required, for: .horizontal)
+            field.setAccessibilityElement(false)
+            addArrangedSubview(field)
+        }
+        number.alignment = leading ? .left : .right
+        if leading { addArrangedSubview(spacer) }
+        number.wantsLayer = true
+        number.layer?.masksToBounds = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // 只固定整列宽度，列内紧凑排布，额外空间由列首／列尾的 spacer 承担。
+    func configure(_ references: [StatusReadoutValue]) -> CGFloat {
+        ceil(references.map { value in
+            [value.prefix, value.number, value.unit].reduce(0) { width, text in
+                let cell = NSTextFieldCell(textCell: text)
+                cell.font = StatusReadout.font
+                return width + cell.cellSize.width
+            }
+        }.max() ?? 0) + 2
     }
 }
 
 final class StatusReadout: NSStackView {
     static let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-    private let fields = (0..<3).map { index in
-        NSHostingView(rootView: StatusReadoutText(reading: StatusReadoutValue(), alignment: index == 2 ? .leading : .trailing))
-    }
+    private let fields = (0..<3).map { StatusReadoutColumn(leading: $0 == 2) }
     private var widths: [NSLayoutConstraint] = []
     private var configuration: (scale: CPUScale, precision: Int)?
 
@@ -34,9 +60,9 @@ final class StatusReadout: NSStackView {
         super.init(frame: .zero)
         orientation = .horizontal
         spacing = 4
+        wantsLayer = true
         for field in fields {
-            // SwiftUI 只绘制数字，尺寸仍由原生约束控制，避免动画撑动菜单栏。
-            field.sizingOptions = []
+            // 只动画数字图层，单位与方向箭头留在静态视图中。
             field.heightAnchor.constraint(equalToConstant: 16).isActive = true
             field.setAccessibilityElement(false)
             addArrangedSubview(field)
@@ -54,18 +80,17 @@ final class StatusReadout: NSStackView {
         configuration = (cpuScale, digits)
         // 只为当前设置预留空间；切换设置可以调整宽度，采样更新不能带动菜单栏移动。
         let cpuMaximum = cpuScale == .average ? 100 : ProcessInfo.processInfo.processorCount * 100
-        let cpu = Double(cpuMaximum).formatted(.number.precision(.fractionLength(digits))) + "%"
-        let memory = ceil(ValueFormat.memoryGigabytes(ProcessInfo.processInfo.physicalMemory))
-            .formatted(.number.precision(.fractionLength(digits))) + "G"
+        let cpu = StatusReadoutValue(number: Double(cpuMaximum).formatted(.number.precision(.fractionLength(digits))), unit: "%")
+        let memory = StatusReadoutValue(number: ceil(ValueFormat.memoryGigabytes(ProcessInfo.processInfo.physicalMemory))
+            .formatted(.number.precision(.fractionLength(digits))), unit: "G")
         let rates = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"].map {
-            "↓\(1000.0.formatted(.number.precision(.fractionLength(digits)))) \($0)"
+            StatusReadoutValue(number: 1000.0.formatted(.number.precision(.fractionLength(digits))), unit: " " + $0, prefix: "↓")
         }
         let minimum = ValueFormat.number(0.0001, precision: digits)
-        let references = [[cpu, minimum + "%"], [memory, minimum + "G"], rates]
+        let references = [[cpu, StatusReadoutValue(number: minimum, unit: "%")],
+                          [memory, StatusReadoutValue(number: minimum, unit: "G")], rates]
         for (index, samples) in references.enumerated() {
-            let font = Self.font
-            let width = samples.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
-            widths[index].constant = ceil(width) + 2
+            widths[index].constant = fields[index].configure(samples)
         }
         return true
     }
@@ -73,22 +98,35 @@ final class StatusReadout: NSStackView {
     // 文本只负责显示，让整个区域继续由原生菜单栏按钮处理点击和高亮。
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    @discardableResult func update(_ values: [String], cpuScale: CPUScale, precision: Int) -> Bool {
+    @discardableResult func update(_ values: [StatusReadoutValue], cpuScale: CPUScale, precision: Int) -> Bool {
         let changed = configure(cpuScale: cpuScale, precision: precision)
         for (field, value) in zip(fields, values) {
-            let reading = field.rootView.reading
-            guard reading.text != value else { continue }
+            guard field.stringValue != value.text else { continue }
             // 首次读数、缺失值和设置切换直接替换，正常采样才播放数字过渡。
-            let animate = !changed && !reading.text.contains("—") && !value.contains("—")
+            let animate = !changed && field.number.stringValue != value.number
+                && !field.number.stringValue.contains("—") && !value.number.contains("—")
                 && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-            withAnimation(animate ? .easeOut(duration: 0.22) : nil) { reading.text = value }
+            field.number.layer?.removeAnimation(forKey: kCATransition)
+            field.prefix.stringValue = value.prefix
+            field.unit.stringValue = value.unit
+            field.number.stringValue = value.number
+            if animate {
+                let transition = CATransition()
+                transition.type = .push
+                transition.subtype = .fromTop
+                transition.duration = 0.22
+                transition.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                field.number.layer?.add(transition, forKey: kCATransition)
+            }
         }
         return changed
     }
 
-    @MainActor static func values(_ model: MonitorModel) -> [String] {
+    @MainActor static func values(_ model: MonitorModel) -> [StatusReadoutValue] {
         let cpu = model.snapshot(.cpu), memory = model.snapshot(.memory), network = model.snapshot(.network)
-        return ["\(cpu.number)\(cpu.value == nil ? "" : "%")", "\(memory.number)\(memory.value == nil ? "" : "G")", "↓\(network.reading)"]
+        return [StatusReadoutValue(number: cpu.number, unit: cpu.value == nil ? "" : "%"),
+                StatusReadoutValue(number: memory.number, unit: memory.value == nil ? "" : "G"),
+                StatusReadoutValue(number: network.number, unit: network.value == nil ? "" : " " + network.unit, prefix: "↓")]
     }
 }
 final class DetailWindow: NSWindow {
@@ -273,7 +311,7 @@ final class OverviewPanel: NSPanel {
         if statusReadout.update(values, cpuScale: model.cpuScale, precision: model.precision) {
             status.length = statusReadout.fittingSize.width + 16
         }
-        status.button?.setAccessibilityValue(values.joined(separator: "  "))
+        status.button?.setAccessibilityValue(values.map(\.text).joined(separator: "  "))
     }
     @objc func toggleOverview() { overviewPanel.isVisible && !closingWindows.contains(ObjectIdentifier(overviewPanel)) ? hideOverview() : showOverview() }
     func hideOverview() {
