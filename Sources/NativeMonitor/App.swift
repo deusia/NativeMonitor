@@ -2,10 +2,41 @@ import AppKit
 import SwiftUI
 import Combine
 
-struct StatusReadout {
-    @MainActor static func title(_ model: MonitorModel) -> String {
+final class StatusReadout: NSStackView {
+    private let fields = (0..<3).map { _ in NSTextField(labelWithString: "—") }
+
+    init() {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        spacing = 8
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        // 按硬件上限和最高小数精度预留各列宽度，避免读数、精度及速率单位变化带动其他指标。
+        let cpu = ValueFormat.number(Double(ProcessInfo.processInfo.processorCount * 100) + 0.99, precision: 2) + "%"
+        let memory = ValueFormat.number(ValueFormat.memoryGigabytes(ProcessInfo.processInfo.physicalMemory) + 0.99, precision: 2) + "G"
+        let rates = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"].map {
+            "↓\(ValueFormat.number(1000.99, precision: 2)) \($0)"
+        }
+        let references = [[cpu, "<0.01%"], [memory, "<0.01G"], rates]
+        for (field, samples) in zip(fields, references) {
+            field.font = font
+            field.alignment = .right
+            field.setAccessibilityElement(false)
+            addArrangedSubview(field)
+            let width = samples.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+            field.widthAnchor.constraint(equalToConstant: ceil(width) + 2).isActive = true
+        }
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    // 文本只负责显示，让整个区域继续由原生菜单栏按钮处理点击和高亮。
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func update(_ values: [String]) {
+        for (field, value) in zip(fields, values) { field.stringValue = value }
+    }
+
+    @MainActor static func values(_ model: MonitorModel) -> [String] {
         let cpu = model.snapshot(.cpu), memory = model.snapshot(.memory), network = model.snapshot(.network)
-        return "\(cpu.number)\(cpu.value == nil ? "" : "%")  \(memory.number)\(memory.value == nil ? "" : "G")  ↓\(network.value == nil ? "—" : network.reading)"
+        return ["\(cpu.number)\(cpu.value == nil ? "" : "%")", "\(memory.number)\(memory.value == nil ? "" : "G")", "↓\(network.reading)"]
     }
 }
 final class DetailWindow: NSWindow {
@@ -33,6 +64,7 @@ final class OverviewPanel: NSPanel {
         super.init()
     }
     var status: NSStatusItem!
+    let statusReadout = StatusReadout()
     var overviewPanel: OverviewPanel!
     var outsideClickMonitor: Any?
     var localClickMonitor: Any?
@@ -44,11 +76,17 @@ final class OverviewPanel: NSPanel {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
         model.start()
-        let statusFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        status = NSStatusBar.system.statusItem(withLength: statusReadout.fittingSize.width + 16)
         status.button?.target = self
         status.button?.action = #selector(toggleOverview)
-        status.button?.font = statusFont
+        if let button = status.button {
+            statusReadout.translatesAutoresizingMaskIntoConstraints = false
+            button.addSubview(statusReadout)
+            NSLayoutConstraint.activate([
+                statusReadout.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+                statusReadout.centerYAnchor.constraint(equalTo: button.centerYAnchor)
+            ])
+        }
         status.button?.setAccessibilityLabel("性能监控，点击打开概览")
         status.button?.toolTip = "性能监控"
         overviewPanel = OverviewPanel(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -179,7 +217,9 @@ final class OverviewPanel: NSPanel {
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(sender); return false }
     func updateStatus() {
-        status.button?.title = StatusReadout.title(model)
+        let values = StatusReadout.values(model)
+        statusReadout.update(values)
+        status.button?.setAccessibilityValue(values.joined(separator: "  "))
         status.button?.toolTip = "CPU / 内存 / 接收"
     }
     @objc func toggleOverview() { overviewPanel.isVisible && !closingWindows.contains(ObjectIdentifier(overviewPanel)) ? hideOverview() : showOverview() }
