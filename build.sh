@@ -5,6 +5,8 @@ if [[ "$(uname -m)" != "arm64" ]]; then
   echo "此应用只面向 Apple Silicon，请在 arm64 Mac 上构建。" >&2
   exit 1
 fi
+python3 scripts/check-version.py
+version="$(cat VERSION)"
 sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
 sdk_version="$(xcrun --sdk macosx --show-sdk-version)"
 # 明确记录实际 SDK，避免当前链接流程将 SDK 版本写成最低部署版本。
@@ -13,7 +15,7 @@ app_path="$(pwd)/../NativeMonitor.app"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 cp .build/release/NativeMonitor "$app_path/Contents/MacOS/NativeMonitor"
 cp Assets/NativeMonitor.icns "$app_path/Contents/Resources/NativeMonitor.icns"
-cat > "$app_path/Contents/Info.plist" <<'PLIST'
+cat > "$app_path/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -23,7 +25,7 @@ cat > "$app_path/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>NativeMonitor</string>
 <key>CFBundleDisplayName</key><string>性能监控</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.0.94</string>
+<key>CFBundleShortVersionString</key><string>$version</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
