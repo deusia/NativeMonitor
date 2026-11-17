@@ -1,0 +1,29 @@
+name: 问题反馈
+description: 报告崩溃、指标异常、界面或安装问题。
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      placeholder: 例如 0.0.94；自行构建请附提交号
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 芯片与 macOS 版本
+      placeholder: 例如 Apple M5 Max，macOS 27.3 (26C5047e)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请说明操作过程、预期结果及实际结果。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图或日志
+      description: 可补充截图、错误信息及对照工具的读数。请遮盖用户名、设备序列号和其他隐私信息。

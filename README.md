@@ -4,6 +4,24 @@
 
 > 项目仍处于原型阶段。GPU 驱动计数器、ANE 功耗和传感器依赖实验性数据源，兼容性随硬件和系统版本而异。
 
+## 下载与安装
+
+[**下载最新版本**](https://github.com/deusia/NativeMonitor/releases/latest) · [问题反馈](https://github.com/deusia/NativeMonitor/issues/new/choose)
+
+1. 在 Release 页面下载 `NativeMonitor-<版本>-macos-arm64.zip`，适用于 Apple Silicon Mac。
+2. 解压，将 `NativeMonitor.app` 拖入“应用程序”，双击启动，从菜单栏打开概览。
+3. 当前版本仅使用本地 ad-hoc 签名，未经 Apple 公证。若 macOS 阻止打开，确认来源后在“系统设置 → 隐私与安全性”中允许打开；不需要关闭系统安全保护。
+
+Release 附带 `SHA256SUMS.txt`，可在下载目录运行 `shasum -a 256 -c SHA256SUMS.txt` 校验文件；只下载部分附件时，其余文件会报告缺失。最低部署版本为 macOS 14，实际验证环境见[兼容性记录](docs/compatibility.md)。
+
+## 界面预览
+
+以下为 0.0.94 在 Apple M5 Max 上运行的真实截图，图表只包含启动后的采样数据。
+
+| 性能概览 | CPU 详情 |
+| --- | --- |
+| ![性能概览](docs/images/overview.png) | ![CPU 详情](docs/images/details.png) |
+
 ## 功能
 
 - **菜单栏读数**：显示 CPU 使用率、内存用量和网络下载速率。
@@ -135,9 +153,18 @@ GPU 字段来自 IORegistry 的 `IOAccelerator` / `PerformanceStatistics`，只�
 
 背景模糊依赖私有系统接口，系统升级可能使效果失效；减少透明度时使用普通背景。跨硬件、旧系统、长期资源占用、受控负载精度和完整无障碍验收仍需验证。
 
-- [实机数据核验记录](monitor-validation.md)：CPU、内存、磁盘和网络的历史对照及未覆盖范围。
-- [神经加速器实时占用调研](neural-utilization-investigation.md)：GPU Neural Accelerator 和 ANE 数据源的实验结果与限制。
-- 根目录其他 `*validation.md`、`*validation.txt`、`native-backdrop-candidate.md`、`native-content-structure.md` 和 `native-material-investigation.md` 是阶段性历史记录，其中的实现、测试结果和“当前”描述只适用于记录当时，不代表现有版本。
+- [实机数据核验记录](docs/monitor-validation.md)：CPU、内存、磁盘和网络的历史对照及未覆盖范围。
+- [神经加速器实时占用调研](docs/neural-utilization-investigation.md)：GPU Neural Accelerator 和 ANE 数据源的实验结果与限制。
+- `docs/` 中其他 `*validation.md`、`*validation.txt`、`native-backdrop-candidate.md`、`native-content-structure.md` 和 `native-material-investigation.md` 是阶段性历史记录，其中的实现、测试结果和“当前”描述只适用于记录当时，不代表现有版本。
+
+## 反馈与贡献
+
+报告问题时请提供应用版本、芯片、macOS 版本及复现步骤，可附已遮盖隐私信息的截图或日志。欢迎通过 [Issues](https://github.com/deusia/NativeMonitor/issues/new/choose) 反馈，通过 PR 参与改进。
+
+- [贡献说明](docs/CONTRIBUTING.md)：开发环境、验证命令和 PR 要求。
+- [兼容性记录](docs/compatibility.md)：实测环境与未验证范围。
+- [发布流程](docs/releasing.md)：版本检查、打包、校验和发布。
+- [自动构建与测试](https://github.com/deusia/NativeMonitor/actions/workflows/ci.yml)：每次推送和 PR 运行检查，产物供验证，不自动发布。
 
 ## 许可证
 
