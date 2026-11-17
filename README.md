@@ -153,15 +153,15 @@ GPU 字段来自 IORegistry 的 `IOAccelerator` / `PerformanceStatistics`，只�
 
 背景模糊依赖私有系统接口，系统升级可能使效果失效；减少透明度时使用普通背景。跨硬件、旧系统、长期资源占用、受控负载精度和完整无障碍验收仍需验证。
 
-- [实机数据核验记录](monitor-validation.md)：CPU、内存、磁盘和网络的历史对照及未覆盖范围。
-- [神经加速器实时占用调研](neural-utilization-investigation.md)：GPU Neural Accelerator 和 ANE 数据源的实验结果与限制。
-- 根目录其他 `*validation.md`、`*validation.txt`、`native-backdrop-candidate.md`、`native-content-structure.md` 和 `native-material-investigation.md` 是阶段性历史记录，其中的实现、测试结果和“当前”描述只适用于记录当时，不代表现有版本。
+- [实机数据核验记录](docs/monitor-validation.md)：CPU、内存、磁盘和网络的历史对照及未覆盖范围。
+- [神经加速器实时占用调研](docs/neural-utilization-investigation.md)：GPU Neural Accelerator 和 ANE 数据源的实验结果与限制。
+- `docs/` 中其他 `*validation.md`、`*validation.txt`、`native-backdrop-candidate.md`、`native-content-structure.md` 和 `native-material-investigation.md` 是阶段性历史记录，其中的实现、测试结果和“当前”描述只适用于记录当时，不代表现有版本。
 
 ## 反馈与贡献
 
 报告问题时请提供应用版本、芯片、macOS 版本及复现步骤，可附已遮盖隐私信息的截图或日志。欢迎通过 [Issues](https://github.com/deusia/NativeMonitor/issues/new/choose) 反馈，通过 PR 参与改进。
 
-- [贡献说明](CONTRIBUTING.md)：开发环境、验证命令和 PR 要求。
+- [贡献说明](docs/CONTRIBUTING.md)：开发环境、验证命令和 PR 要求。
 - [兼容性记录](docs/compatibility.md)：实测环境与未验证范围。
 - [发布流程](docs/releasing.md)：版本检查、打包、校验和发布。
 - [自动构建与测试](https://github.com/deusia/NativeMonitor/actions/workflows/ci.yml)：每次推送和 PR 运行检查，产物供验证，不自动发布。

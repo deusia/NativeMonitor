@@ -4,7 +4,7 @@
 
 ## 本地开发
 
-需要 Apple Silicon Mac、Swift 6 工具链和包含 macOS 26 Glass API 的 Xcode SDK。构建方法见 [README](README.md#构建与运行)，实际验证范围见[兼容性记录](docs/compatibility.md)。
+需要 Apple Silicon Mac、Swift 6 工具链和包含 macOS 26 Glass API 的 Xcode SDK。构建方法见 [README](../README.md#构建与运行)，实际验证范围见[兼容性记录](compatibility.md)。
 
 ```sh
 python3 scripts/check-version.py --self-test
@@ -12,6 +12,8 @@ python3 scripts/check-version.py
 swift test
 ./build.sh
 ```
+
+CI 通过 Xcode 工程运行同一套测试，使测试进程具有应用宿主；本地也可在 Xcode 中按 ⌘U 验证。
 
 Swift 源码位于 `Sources/NativeMonitor`，私有背景接口封装位于 `Sources/PrivateBackdrop`，测试位于 `Tests/NativeMonitorTests`。
 
@@ -23,4 +25,4 @@ Swift 源码位于 `Sources/NativeMonitor`，私有背景接口封装位于 `Sou
 
 贡献代码随项目采用 GPL-3.0-only。引用第三方代码、数据映射或资源时，请保留来源和适用的版权、许可声明，不提交密钥、私人日志或设备标识。
 
-发布版本时参照[发布流程](docs/releasing.md)。
+发布版本时参照[发布流程](releasing.md)。

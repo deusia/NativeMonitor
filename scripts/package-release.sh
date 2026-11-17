@@ -19,7 +19,7 @@ trap 'rm -rf "$stage"' EXIT
 package="NativeMonitor-$version"
 mkdir "$stage/$package"
 ditto ../NativeMonitor.app "$stage/$package/NativeMonitor.app"
-cp LICENSE README.md CONTRIBUTING.md "$stage/$package/"
+cp LICENSE README.md "$stage/$package/"
 ditto docs "$stage/$package/docs"
 git rev-parse HEAD > "$stage/$package/SOURCE.txt"
 printf '对应源码：https://github.com/deusia/NativeMonitor/tree/%s\n' "$(git rev-parse HEAD)" >> "$stage/$package/SOURCE.txt"

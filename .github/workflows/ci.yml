@@ -37,7 +37,7 @@ jobs:
           open -a Finder
           open -a SystemUIServer
       - name: 运行测试
-        run: swift test
+        run: xcodebuild -project NativeMonitor.xcodeproj -scheme NativeMonitor -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/xcode test
       - name: 构建发布包
         run: ./scripts/package-release.sh
       - name: 保存构建产物
