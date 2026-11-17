@@ -31,6 +31,11 @@ jobs:
           bash -n build.sh scripts/package-release.sh
           python3 scripts/check-version.py --self-test
           python3 scripts/check-version.py
+      # 菜单栏定位测试需要系统菜单栏服务，不能仅启动 XCTest 进程。
+      - name: 准备桌面会话
+        run: |
+          open -a Finder
+          open -a SystemUIServer
       - name: 运行测试
         run: swift test
       - name: 构建发布包
