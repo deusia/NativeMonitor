@@ -2,6 +2,12 @@
 
 面向 Apple Silicon 的 macOS 菜单栏性能监控原型，使用 SwiftUI、AppKit 和系统计数器。CPU、GPU、内存、磁盘和网络显示本机采样数据；GPU 驱动计数器和 ANE 功耗属于实验性数据源。
 
+## 许可证
+
+Copyright (C) 2026 deusia
+
+本项目采用 [GNU General Public License v3.0（GPL-3.0-only）](LICENSE)。允许使用、修改及商业分发；分发本项目或其衍生作品时，必须按 GPL-3.0 提供对应的完整源码、保留版权和许可证声明，并注明修改。仅私人使用或修改不要求公开源码。本项目不提供任何担保，具体权利和义务以许可证全文为准。
+
 ## 使用 Xcode 构建
 
 需要 Apple Silicon Mac、Swift 6 工具链，以及包含 macOS 26 Glass API 的 Xcode SDK。最低部署版本为 macOS 14；macOS 26 及以上使用 Glass API。当前仅在开发机器的系统和 SDK 上验证。
